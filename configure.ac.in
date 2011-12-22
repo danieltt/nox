@@ -77,6 +77,7 @@ ACI_PACKAGE([netapps],[misc network apps],
                	bindings_storage switchstats flow_fetcher data
                	switch_management networkstate hoststate tablog 
                	route lavi monitoring spanning_tree flowtracer
+		fns
                 #add netapps component here
 		],
                [TURN_ON_NETAPPS])
