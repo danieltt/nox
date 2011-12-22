@@ -130,6 +130,7 @@ struct llc_snap_header {
 BOOST_STATIC_ASSERT(LLC_SNAP_HEADER_LEN == sizeof(struct llc_snap_header));
 
 #define VLAN_VID 0x0fff
+#define VLAN_VID_MASK 0x0fff
 #define VLAN_PCP_MASK 0xe000
 #define VLAN_PCP_SHIFT 13
 

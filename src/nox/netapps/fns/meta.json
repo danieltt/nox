@@ -1,0 +1,12 @@
+{
+    "components": [
+        {
+            "name": "fns" ,
+            "library": "fns",
+            "dependencies": [
+                "discovery"
+                
+            ]
+        }
+    ]
+}
