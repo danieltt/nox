@@ -123,7 +123,7 @@ private:
 	PathFinder finder;
 	RulesDB rules;
 	Locator locator;
-	int cookie;
+	uint64_t cookie;
 
 	void set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
 			uint16_t vlan);
