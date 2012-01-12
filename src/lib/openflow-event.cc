@@ -71,8 +71,8 @@ handle_packet_in(boost::shared_ptr<Openflow_connection> oconn,
     /* jump past packet ofp_header and get access to packet data
      * */
     packet->pull(offsetof(ofp_packet_in, data));
-    lg.dbg("received packet-in event from %s (len:%zu)",
-           datapath_id.string().c_str(), packet->size());
+    //lg.dbg("received packet-in event from %s (len:%zu)",
+    //       datapath_id.string().c_str(), packet->size());
     return new Packet_in_event(datapath_id, opi, packet);
 }
 
