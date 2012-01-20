@@ -74,6 +74,7 @@ Disposition fns::handle_packet_in(const Event& e) {
 	uint32_t vlan;
 	uint32_t mpls = 0;
 	ethernetaddr dl_src;
+	int buf_id;
 
 #ifdef NOX_OF10
 	const Packet_in_event& pi = assert_cast<const Packet_in_event&> (e);
@@ -83,6 +84,7 @@ Disposition fns::handle_packet_in(const Event& e) {
 	port = pi.in_port;
 	dl_src = ethernetaddr(flow.dl_src);
 	vlan = ntohs(flow.dl_vlan);
+	buf_id = pi.buffer_id;
 #else
 	const Ofp_msg_event& ome = assert_cast<const Ofp_msg_event&> (e);
 	struct ofl_msg_packet_in *in = (struct ofl_msg_packet_in *) **ome.msg;
@@ -93,6 +95,7 @@ Disposition fns::handle_packet_in(const Event& e) {
 	vlan = flow.match.dl_vlan;
 	mpls = flow.match.mpls_label;
 	dl_src = ethernetaddr(flow.match.dl_src);
+	buf_id = in->buffer_id;
 #endif
 
 	/* drop all LLDP packets */
@@ -115,7 +118,7 @@ Disposition fns::handle_packet_in(const Event& e) {
 		if (locator.insertClient(dl_src, ep))
 			locator.printLocations();
 		/*TODO fix buffer id -1*/
-		process_packet_in(ep, flow, b, -1);
+		process_packet_in(ep, flow, b, buf_id);
 	}
 
 	return CONTINUE;
@@ -128,22 +131,23 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 	vector<Node*> path;
 	int in_port = 0, out_port = 0;
 	int psize;
-	buf_id = -1;
+	//buf_id = -1;
 	pair<int, int> ports;
 	boost::shared_ptr<FNS> fns = rules.getFNS(ep_src->fns_uuid);
 	boost::shared_ptr<Buffer> buff1;// = boost::shared_ptr<Buffer>();
 
-	lg.dbg("Processing and installing rule for %ld:%d in fns: %ld\n",
-			ep_src->ep_id, ep_src->in_port, fns->getUuid());
+	lg.dbg(
+			"Processing and installing rule for %ld:%d in fns: %ld and buff_id %x\n",
+			ep_src->ep_id, ep_src->in_port, fns->getUuid(), buf_id);
 	/* Is destination broadcast address and ARP?*/
 #ifdef NOX_OF10
 	ethernetaddr dl_dst = ethernetaddr(flow.dl_dst);
 	ethernetaddr dl_src = ethernetaddr(flow.dl_src);
-	if (flow.dl_type == ethernet::ARP) {
+	if (flow.dl_type == ethernet::ARP && dl_dst.is_broadcast()) {
 #else
 		ethernetaddr dl_dst = ethernetaddr(flow.match.dl_dst);
 		ethernetaddr dl_src = ethernetaddr(flow.match.dl_src);
-		if (flow.match.dl_type == ETH_TYPE_ARP) {
+		if (flow.match.dl_type == ETH_TYPE_ARP && dl_dst.is_broadcast()) {
 #endif
 		lg.dbg("Sending ARP to all %d endpoints: src %s dst: %s",
 				fns->numEPoints(), dl_src.string().c_str(),
@@ -179,6 +183,7 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 				forward_via_controller(ep->ep_id, buff, ep->in_port);
 			}
 		}
+		return;
 	}
 
 	/*Get location of destination*/
@@ -210,48 +215,52 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 	psize = path.size();
 
 	/*Install specific rules with src and destination L2*/
-	lg.dbg("VLAN src: %d dst: %d", ep_src->vlan, ep_dst->vlan);
+	lg.dbg("EP src: %d dst: %d", ep_src->ep_id, ep_dst->ep_id);
+	lg.dbg("L2 src: %s dst: %s", dl_src.string().c_str(),
+			dl_dst.string().c_str());
 
-	for (int k = psize - 1; k >= 0; k--) {
+	for (int k = 0; k < psize; k++) {
+		lg.dbg("id: %d ", path.at(k)->id);
+	}
+	for (int k = 0; k < psize; k++) {
+		int bufid = -1;
 		if (psize == 1) {
 			/*Endpoint in the same node*/
 			ports = pair<int, int> (ep_dst->in_port, ep_src->in_port);
-		} else if (k > 0) {
-			ports = path.at(k)->getPortTo(path.at(k - 1));
+		} else if (k < psize - 1) {
+			ports = path.at(k)->getPortTo(path.at(k + 1));
+			lg.dbg("in %d out: %d", ports.first, ports.second);
 		}
 		out_port = ports.first;
+
+
 		if (k == 0) {
-			out_port = ep_dst->in_port;
+			in_port = ep_dst->in_port;
 		}
+
 		if (k == path.size() - 1) {
-			in_port = ep_src->in_port;
+			out_port = ep_src->in_port;
 		}
 
-		/*Conflict resolution*/
-		//flow = getMatchFlow(path.at(k)->id, flow);
-
-
-		/*dst node and no expect vlan*/
-		if (k == path.size() - 1 && ep_dst->vlan == fns::VLAN_NONE
-				&& ep_src->vlan != fns::VLAN_NONE) {
+		if ((k == 0) && (ep_src->vlan == fns::VLAN_NONE) && (ep_dst->vlan
+				!= fns::VLAN_NONE)) {
 			/*pop vlan*/
-			match = install_rule_vlan_pop(path.at(k)->id, out_port, dl_dst,
-					buf_id, ep_src->vlan);
-		} else if (k == path.size() - 1 && ep_dst->vlan != fns::VLAN_NONE
-				&& ep_src->vlan == fns::VLAN_NONE) {
+			match = install_rule_vlan_pop(path.at(k)->id, out_port, dl_src,
+					bufid, ep_dst->vlan);
+		} else if ((k == 0) && ep_src->vlan != fns::VLAN_NONE && ep_dst->vlan
+				== fns::VLAN_NONE) {
 			/*push vlan*/
-			match = install_rule_vlan_push(path.at(k)->id, out_port, dl_dst,
-					buf_id, ep_dst->vlan);
-		} else if (k == path.size() - 1 && ep_dst->vlan != ep_src->vlan
-				&& ep_src->vlan != fns::VLAN_NONE && ep_dst->vlan
-				!= fns::VLAN_NONE) {
+			match = install_rule_vlan_push(path.at(k)->id, out_port, dl_src,
+					bufid, ep_src->vlan);
+		} else if ((k == 0) && ep_dst->vlan != ep_src->vlan && ep_src->vlan
+				!= fns::VLAN_NONE && ep_dst->vlan != fns::VLAN_NONE) {
 			/*change vlan*/
-			match = install_rule_vlan_swap(path.at(k)->id, out_port, dl_dst,
-					buf_id, ep_src->vlan, ep_dst->vlan);
+			match = install_rule_vlan_swap(path.at(k)->id, out_port, dl_src,
+					bufid, ep_dst->vlan, ep_src->vlan);
 		} else {
 			/*none*/
-			match = install_rule(path.at(k)->id, out_port, dl_dst, buf_id,
-					ep_dst->vlan, 0);
+			match = install_rule(path.at(k)->id, out_port, dl_src, bufid,
+					ep_src->vlan, 0);
 		}
 
 		/* Keeping track of the installed rules */
@@ -260,35 +269,40 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 		ep_src->addRule(rule);
 		ep_dst->addRule(rule);
 
-		if ((k == 0) && (ep_src->vlan == fns::VLAN_NONE) && (ep_dst->vlan
-				!= fns::VLAN_NONE)) {
-			/*src node*/
-
+		if (k == path.size() - 1) {
+			bufid = buf_id;
+			lg.dbg("Setting buff id to %d",bufid);
+		}
+		/*dst node and no expect vlan*/
+		if (k == path.size() - 1 && ep_dst->vlan == fns::VLAN_NONE
+				&& ep_src->vlan != fns::VLAN_NONE) {
 			/*pop vlan*/
-			match = install_rule_vlan_pop(path.at(k)->id, in_port, dl_src,
-					buf_id, ep_dst->vlan);
-		} else if ((k == 0) && ep_src->vlan != fns::VLAN_NONE && ep_dst->vlan
-				== fns::VLAN_NONE) {
+			match = install_rule_vlan_pop(path.at(k)->id, in_port, dl_dst,
+					bufid, ep_src->vlan);
+		} else if (k == path.size() - 1 && ep_dst->vlan != fns::VLAN_NONE
+				&& ep_src->vlan == fns::VLAN_NONE) {
 			/*push vlan*/
-			match = install_rule_vlan_push(path.at(k)->id, in_port, dl_src,
-					buf_id, ep_src->vlan);
-		} else if ((k == 0) && ep_dst->vlan != ep_src->vlan && ep_src->vlan
-				!= fns::VLAN_NONE && ep_dst->vlan != fns::VLAN_NONE) {
+			match = install_rule_vlan_push(path.at(k)->id, in_port, dl_dst,
+					bufid, ep_dst->vlan);
+		} else if (k == path.size() - 1 && ep_dst->vlan != ep_src->vlan
+				&& ep_src->vlan != fns::VLAN_NONE && ep_dst->vlan
+				!= fns::VLAN_NONE) {
 			/*change vlan*/
-			match = install_rule_vlan_swap(path.at(k)->id, in_port, dl_src,
-					buf_id, ep_dst->vlan, ep_src->vlan);
+			match = install_rule_vlan_swap(path.at(k)->id, in_port, dl_dst,
+					bufid, ep_src->vlan, ep_dst->vlan);
 		} else {
 			/*none*/
-			match = install_rule(path.at(k)->id, in_port, dl_src, buf_id,
-					ep_src->vlan, 0);
+			match = install_rule(path.at(k)->id, in_port, dl_dst, bufid,
+					ep_dst->vlan, 0);
 		}
-		/* Keeping track of the installed rules */
 
+		/* Keeping track of the installed rules */
 		rule = boost::shared_ptr<FNSRule>(new FNSRule(path.at(k)->id, match));
 		ep_src->addRule(rule);
 		ep_dst->addRule(rule);
 
 		in_port = ports.second;
+
 
 	}
 
@@ -309,7 +323,7 @@ void fns::set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
 }
 
 void fns::set_mod_def(struct ofp_flow_mod *ofm, int p_out, int buf) {
-	ofm->buffer_id = buf;
+	ofm->buffer_id = htonl(buf);
 	ofm->header.version = OFP_VERSION;
 	ofm->header.type = OFPT_FLOW_MOD;
 
@@ -500,7 +514,7 @@ void fns::set_mod_def(struct ofl_msg_flow_mod *mod, int p_out, int buf) {
 	mod->flags = 0x0000;
 	mod->instructions_num = 1;
 	mod->priority = htons(OFP_DEFAULT_PRIORITY);
-	mod->buffer_id = buf;
+	mod->buffer_id = htonl(buf);
 	mod->hard_timeout = htonl(HARD_TIMEOUT);
 	mod->idle_timeout = IDLE_TIMEOUT;
 }
@@ -900,15 +914,19 @@ int fns::remove_endpoint(boost::shared_ptr<EPoint> ep,
 	return 0;
 }
 int fns::save_fns(fnsDesc* fns1) {
-
-	boost::shared_ptr<FNS> fns = rules.addFNS(fns1);
+	boost::shared_ptr<FNS> fns = rules.getFNS(fns1->uuid);
+	if (fns != NULL) {
+		lg.warn("The FNS uuid exists");
+		return -1;
+	}
+	fns = rules.addFNS(fns1);
 
 	for (int i = 0; i < fns1->nEp; i++) {
 		/*Save endpoints and compute path*/
 		endpoint *ep = GET_ENDPOINT(fns1, i);
 		uint64_t key = rules.addEPoint(ep, fns);
 
-		lg.warn("Endpoint: %ld : %d vlan: %d m: %d k: %lu\n", ep->swId,
+		lg.dbg("Endpoint: %ld : %d vlan: %d m: %d k: %lu\n", ep->swId,
 				ep->port, ep->vlan, ep->mpls, key);
 		if (!key)
 			lg.warn("Collision. Remove endpoint before adding a new one");
