@@ -210,18 +210,10 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 	}
 
 	/*Get shortest path*/
-	//	finder.PrintShortestRouteTo(ep_dst->ep_id);
 	path = finder.getPath(ep_dst->ep_id);
 	psize = path.size();
 
 	/*Install specific rules with src and destination L2*/
-	lg.dbg("EP src: %d dst: %d", ep_src->ep_id, ep_dst->ep_id);
-	lg.dbg("L2 src: %s dst: %s", dl_src.string().c_str(),
-			dl_dst.string().c_str());
-
-	for (int k = 0; k < psize; k++) {
-		lg.dbg("id: %d ", path.at(k)->id);
-	}
 	for (int k = 0; k < psize; k++) {
 		int bufid = -1;
 		if (psize == 1) {
@@ -232,7 +224,6 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 			lg.dbg("in %d out: %d", ports.first, ports.second);
 		}
 		out_port = ports.first;
-
 
 		if (k == 0) {
 			in_port = ep_dst->in_port;
@@ -246,21 +237,21 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 				!= fns::VLAN_NONE)) {
 			/*pop vlan*/
 			match = install_rule_vlan_pop(path.at(k)->id, out_port, dl_src,
-					bufid, ep_dst->vlan);
+					dl_dst, bufid, ep_dst->vlan);
 		} else if ((k == 0) && ep_src->vlan != fns::VLAN_NONE && ep_dst->vlan
 				== fns::VLAN_NONE) {
 			/*push vlan*/
 			match = install_rule_vlan_push(path.at(k)->id, out_port, dl_src,
-					bufid, ep_src->vlan);
+					dl_dst, bufid, ep_src->vlan);
 		} else if ((k == 0) && ep_dst->vlan != ep_src->vlan && ep_src->vlan
 				!= fns::VLAN_NONE && ep_dst->vlan != fns::VLAN_NONE) {
 			/*change vlan*/
 			match = install_rule_vlan_swap(path.at(k)->id, out_port, dl_src,
-					bufid, ep_dst->vlan, ep_src->vlan);
+					dl_dst, bufid, ep_dst->vlan, ep_src->vlan);
 		} else {
 			/*none*/
-			match = install_rule(path.at(k)->id, out_port, dl_src, bufid,
-					ep_src->vlan, 0);
+			match = install_rule(path.at(k)->id, out_port, dl_src, dl_dst,
+					bufid, ep_src->vlan, 0);
 		}
 
 		/* Keeping track of the installed rules */
@@ -271,29 +262,29 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 
 		if (k == path.size() - 1) {
 			bufid = buf_id;
-			lg.dbg("Setting buff id to %d",bufid);
+			lg.dbg("Setting buff id to %d", bufid);
 		}
 		/*dst node and no expect vlan*/
 		if (k == path.size() - 1 && ep_dst->vlan == fns::VLAN_NONE
 				&& ep_src->vlan != fns::VLAN_NONE) {
 			/*pop vlan*/
 			match = install_rule_vlan_pop(path.at(k)->id, in_port, dl_dst,
-					bufid, ep_src->vlan);
+					dl_src, bufid, ep_src->vlan);
 		} else if (k == path.size() - 1 && ep_dst->vlan != fns::VLAN_NONE
 				&& ep_src->vlan == fns::VLAN_NONE) {
 			/*push vlan*/
 			match = install_rule_vlan_push(path.at(k)->id, in_port, dl_dst,
-					bufid, ep_dst->vlan);
+					dl_src, bufid, ep_dst->vlan);
 		} else if (k == path.size() - 1 && ep_dst->vlan != ep_src->vlan
 				&& ep_src->vlan != fns::VLAN_NONE && ep_dst->vlan
 				!= fns::VLAN_NONE) {
 			/*change vlan*/
 			match = install_rule_vlan_swap(path.at(k)->id, in_port, dl_dst,
-					bufid, ep_src->vlan, ep_dst->vlan);
+					dl_src, bufid, ep_src->vlan, ep_dst->vlan);
 		} else {
 			/*none*/
-			match = install_rule(path.at(k)->id, in_port, dl_dst, bufid,
-					ep_dst->vlan, 0);
+			match = install_rule(path.at(k)->id, in_port, dl_dst, dl_src,
+					bufid, ep_dst->vlan, 0);
 		}
 
 		/* Keeping track of the installed rules */
@@ -303,21 +294,22 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 
 		in_port = ports.second;
 
-
 	}
 
 }
 #ifdef NOX_OF10
 void fns::set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
-		uint16_t vlan) {
+		vigil::ethernetaddr dl_src, uint16_t vlan) {
 	memset(match, 0, sizeof(struct ofp_match));
 	/*WILD cards*/
 	uint32_t filter = OFPFW_ALL;
 	/*Filter by port*/
 	filter &= (~OFPFW_DL_DST);
+	filter &= (~OFPFW_DL_SRC);
 	if (vlan != fns::VLAN_NONE)
 		filter &= (~OFPFW_DL_VLAN);
 	memcpy(match->dl_dst, dl_dst.octet, sizeof(dl_dst.octet));
+	memcpy(match->dl_src, dl_src.octet, sizeof(dl_src.octet));
 	match->dl_vlan = htons(vlan);
 	match->wildcards = htonl(filter);
 }
@@ -337,7 +329,7 @@ void fns::set_mod_def(struct ofp_flow_mod *ofm, int p_out, int buf) {
 }
 
 ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
-		int buf, uint16_t vlan, uint32_t mpls) {
+		vigil::ethernetaddr dl_src, int buf, uint16_t vlan, uint32_t mpls) {
 	datapathid src;
 	lg.warn("Installing new path: %ld: %d ->  %s\n", id, p_out,
 			dl_dst.string().c_str());
@@ -350,7 +342,7 @@ ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
 	ofm->header.length = htons(size);
 	src = datapathid::from_host(id);
 
-	set_match(&ofm->match, dl_dst, vlan);
+	set_match(&ofm->match, dl_dst, dl_src, vlan);
 	set_mod_def(ofm, p_out, buf);
 
 	/*Action*/
@@ -369,13 +361,15 @@ ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
 }
 
 ofp_match fns::install_rule_vlan_push(uint64_t id, int p_out,
-		vigil::ethernetaddr dl_dst, int buf, uint32_t vlan) {
+		vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf,
+		uint32_t vlan) {
 
-	return install_rule_vlan_swap(id, p_out, dl_dst, buf, VLAN_NONE, vlan);
+	return install_rule_vlan_swap(id, p_out, dl_dst, dl_src, buf, VLAN_NONE, vlan);
 }
 
 ofp_match fns::install_rule_vlan_pop(uint64_t id, int p_out,
-		vigil::ethernetaddr dl_dst, int buf, uint32_t vlan) {
+		vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf,
+		uint32_t vlan) {
 	datapathid src;
 	lg.warn("Installing new path POP %d : %ld: %d ->  %s\n", vlan, id, p_out,
 			dl_dst.string().c_str());
@@ -389,7 +383,7 @@ ofp_match fns::install_rule_vlan_pop(uint64_t id, int p_out,
 	ofm->header.length = htons(size);
 	src = datapathid::from_host(id);
 
-	set_match(&ofm->match, dl_dst, vlan);
+	set_match(&ofm->match, dl_dst, dl_src, vlan);
 	set_mod_def(ofm, p_out, buf);
 
 	/* Action strip */
@@ -414,7 +408,8 @@ ofp_match fns::install_rule_vlan_pop(uint64_t id, int p_out,
 }
 
 ofp_match fns::install_rule_vlan_swap(uint64_t id, int p_out,
-		vigil::ethernetaddr dl_dst, int buf, uint32_t tag_in, uint32_t tag_out) {
+		vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf,
+		uint32_t tag_in, uint32_t tag_out) {
 	datapathid src;
 	lg.warn("Installing new path SWAP %d > %d: %ld: %d ->  %s\n", tag_in,
 			tag_out, id, p_out, dl_dst.string().c_str());
@@ -428,7 +423,7 @@ ofp_match fns::install_rule_vlan_swap(uint64_t id, int p_out,
 	ofm->header.length = htons(size);
 	src = datapathid::from_host(id);
 
-	set_match(&ofm->match, dl_dst, tag_in);
+	set_match(&ofm->match, dl_dst, dl_src, tag_in);
 	set_mod_def(ofm, p_out, buf);
 
 	/*Action vlan*/

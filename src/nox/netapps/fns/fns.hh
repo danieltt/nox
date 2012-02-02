@@ -125,7 +125,7 @@ private:
 	Locator locator;
 	uint64_t cookie;
 
-	void set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
+	void set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src,
 			uint16_t vlan);
 #ifdef NOX_OF11
 	void set_mod_def(struct ofl_msg_flow_mod *mod, int p_out, int buf);
@@ -136,15 +136,15 @@ private:
 	void forward_via_controller(uint64_t id,
 			const boost::shared_ptr<Buffer> buff, int port);
 	void forward_via_controller(uint64_t id, const Buffer &buff, int port);
-	ofp_match install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
+	ofp_match install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src,
 			int buf, uint16_t vlan, uint32_t mpls);
 
 	ofp_match install_rule_vlan_push(uint64_t id, int p_out,
-			vigil::ethernetaddr dl_dst, int buf, uint32_t tag);
+			vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf, uint32_t tag);
 	ofp_match install_rule_vlan_pop(uint64_t id, int p_out,
-			vigil::ethernetaddr dl_dst, int buf, uint32_t tag);
+			vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf, uint32_t tag);
 	ofp_match install_rule_vlan_swap(uint64_t id, int p_out,
-			vigil::ethernetaddr dl_dst, int buf, uint32_t tag_in,
+			vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf, uint32_t tag_in,
 			uint32_t tag_out);
 
 #ifdef NOX_OF11
