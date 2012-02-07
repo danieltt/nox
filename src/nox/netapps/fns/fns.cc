@@ -364,7 +364,8 @@ ofp_match fns::install_rule_vlan_push(uint64_t id, int p_out,
 		vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf,
 		uint32_t vlan) {
 
-	return install_rule_vlan_swap(id, p_out, dl_dst, dl_src, buf, VLAN_NONE, vlan);
+	return install_rule_vlan_swap(id, p_out, dl_dst, dl_src, buf, VLAN_NONE,
+			vlan);
 }
 
 ofp_match fns::install_rule_vlan_pop(uint64_t id, int p_out,
@@ -481,12 +482,12 @@ int fns::remove_rule(boost::shared_ptr<FNSRule> rule) {
 
 #ifdef NOX_OF11
 void fns::set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
-		uint16_t vlan) {
+		vigil::ethernetaddr dl_src, uint16_t vlan) {
 	memset(match, 0, sizeof(struct ofl_match_standard));
 	match->type = OFPMT_STANDARD;
 	match->wildcards = OFPFW_ALL;
 	match->wildcards = OFPFW_ALL & ~OFPFW_DL_VLAN;
-	memset(match->dl_src_mask, 0xff, 6);
+	//memset(match->dl_src_mask, 0xff, 6);
 	//   memset(match.dl_dst_mask, 0xff, 6);
 	match->nw_src_mask = 0xffffffff;
 	match->nw_dst_mask = 0xffffffff;
@@ -496,6 +497,8 @@ void fns::set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
 	/* L2 dst */
 	memset(match->dl_dst_mask, 0, sizeof(match->dl_dst_mask));
 	memcpy(match->dl_dst, dl_dst.octet, sizeof(dl_dst.octet));
+	memset(match->dl_src_mask, 0, sizeof(match->dl_src_mask));
+	memcpy(match->dl_src, dl_src.octet, sizeof(dl_src.octet));
 }
 
 void fns::set_mod_def(struct ofl_msg_flow_mod *mod, int p_out, int buf) {
@@ -515,14 +518,14 @@ void fns::set_mod_def(struct ofl_msg_flow_mod *mod, int p_out, int buf) {
 }
 
 ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
-		int buf, uint16_t vlan, uint32_t mpls) {
+		vigil::ethernetaddr dl_src, int buf, uint16_t vlan, uint32_t mpls) {
 	struct ofp_match match;
 	struct ofl_msg_flow_mod mod;
 
 	lg.warn("Installing new path: %ld: %d ->  %s\n", id, p_out,
 			dl_dst.string().c_str());
 
-	set_match(&match, dl_dst, vlan);
+	set_match(&match, dl_dst, dl_src, vlan);
 	set_mod_def(&mod, p_out, buf);
 	mod.match = (struct ofl_match_header *) &match;
 
@@ -547,14 +550,15 @@ ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
 }
 
 ofp_match fns::install_rule_vlan_push(uint64_t id, int p_out,
-		vigil::ethernetaddr dl_dst, int buf, uint32_t tag) {
+		vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf,
+		uint32_t tag) {
 	struct ofp_match match;
 	struct ofl_msg_flow_mod mod;
 
 	lg.warn("Installing new path : %ld PUSH %d: %d -> %s\n", id, tag, p_out,
 			dl_dst.string().c_str());
 
-	set_match(&match, dl_dst, OFPVID_NONE);
+	set_match(&match, dl_dst, dl_src, OFPVID_NONE);
 	set_mod_def(&mod, p_out, buf);
 	mod.match = (struct ofl_match_header *) &match;
 
@@ -588,14 +592,15 @@ ofp_match fns::install_rule_vlan_push(uint64_t id, int p_out,
 }
 
 ofp_match fns::install_rule_vlan_pop(uint64_t id, int p_out,
-		vigil::ethernetaddr dl_dst, int buf, uint32_t tag) {
+		vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf,
+		uint32_t tag) {
 	struct ofp_match match;
 	struct ofl_msg_flow_mod mod;
 	datapathid dpid = datapathid::from_host(id);
 
 	lg.warn("Installing new path  %ld POP %d: %d ->%s\n", id, tag, p_out,
 			dl_dst.string().c_str());
-	set_match(&match, dl_dst, tag);
+	set_match(&match, dl_dst, dl_src, tag);
 	set_mod_def(&mod, p_out, buf);
 	mod.match = (struct ofl_match_header *) &match;
 
@@ -626,14 +631,15 @@ ofp_match fns::install_rule_vlan_pop(uint64_t id, int p_out,
 }
 
 ofp_match fns::install_rule_vlan_swap(uint64_t id, int p_out,
-		vigil::ethernetaddr dl_dst, int buf, uint32_t tag_in, uint32_t tag_out) {
+		vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf,
+		uint32_t tag_in, uint32_t tag_out) {
 	struct ofp_match match;
 	struct ofl_msg_flow_mod mod;
 
 	lg.warn("Installing new path : %ld CHANGE TAG %d -> %d %d -> %s\n", id,
 			tag_in, tag_out, p_out, dl_dst.string().c_str());
 
-	set_match(&match, dl_dst, tag_in);
+	set_match(&match, dl_dst, dl_src, tag_in);
 	set_mod_def(&mod, p_out, buf);
 	mod.match = (struct ofl_match_header *) &match;
 
@@ -663,6 +669,7 @@ ofp_match fns::install_rule_vlan_swap(uint64_t id, int p_out,
 	return match;
 }
 
+#ifdef MPLS
 ofp_match fns::install_rule_mpls_push(uint64_t id, int p_out,
 		vigil::ethernetaddr dl_dst, int buf, uint32_t tag) {
 	struct ofp_match match;
@@ -788,6 +795,7 @@ ofp_match fns::install_rule_mpls_swap(uint64_t id, int p_out,
 	}
 	return match;
 }
+#endif
 
 int fns::remove_rule(boost::shared_ptr<FNSRule> rule) {
 	datapathid dpid;

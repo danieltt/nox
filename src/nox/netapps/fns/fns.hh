@@ -148,6 +148,7 @@ private:
 			uint32_t tag_out);
 
 #ifdef NOX_OF11
+#ifdef MPLS
 	ofp_match install_rule_mpls_push(uint64_t id, int p_out,
 			vigil::ethernetaddr dl_dst, int buf, uint32_t tag);
 	ofp_match install_rule_mpls_pop(uint64_t id, int p_out,
@@ -155,6 +156,7 @@ private:
 	ofp_match install_rule_mpls_swap(uint64_t id, int p_out,
 			vigil::ethernetaddr dl_dst, int buf, uint32_t tag_in,
 			uint32_t tag_out);
+#endif
 #endif
 };
 }
