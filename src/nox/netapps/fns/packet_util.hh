@@ -29,10 +29,17 @@ public:
 	static const int TC_ARP = 0x2;
 	static const int TC_IPV6 = 0x3;
 
+	static boost::shared_ptr<Buffer> pkt_arp_request(uint32_t nw_src,
+			uint32_t nw_dst, uint8_t dl_src[]);
+	static boost::shared_ptr<Buffer> pkt_arp_reply(uint32_t nw_src,
+			uint32_t nw_dst, uint8_t dl_src[], uint8_t dl_dst[]);
+
 	/* VLAN packet modifications*/
-	static boost::shared_ptr<Buffer> pkt_swap_vlan(const Buffer& buff, uint16_t vlanid);
+	static boost::shared_ptr<Buffer> pkt_swap_vlan(const Buffer& buff,
+			uint16_t vlanid);
 	static boost::shared_ptr<Buffer> pkt_pop_vlan(const Buffer& buff);
-	static boost::shared_ptr<Buffer> pkt_push_vlan(const Buffer& buff, uint16_t vlanid);
+	static boost::shared_ptr<Buffer> pkt_push_vlan(const Buffer& buff,
+			uint16_t vlanid);
 
 #ifdef NOX_OF11
 	/* MPLS packet modification */
