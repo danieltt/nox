@@ -60,13 +60,16 @@ uint64_t EPoint::generate_key(uint64_t sw_id, uint32_t port, uint16_t vlan,
 	return seed;
 }
 
-FNS::FNS(uint64_t uuid) :
-	uuid(uuid) {
+FNS::FNS(uint64_t uuid, uint8_t forwarding) :
+	uuid(uuid), forwarding(forwarding) {
 
 }
 
 uint64_t FNS::getUuid() {
 	return uuid;
+}
+uint8_t FNS::getForwarding() {
+	return forwarding;
 }
 
 void FNS::addEPoint(boost::shared_ptr<EPoint> ep) {
@@ -121,7 +124,7 @@ boost::shared_ptr<EPoint> RulesDB::getEpoint(uint64_t id) {
 }
 
 boost::shared_ptr<FNS> RulesDB::addFNS(fnsDesc* fns1) {
-	boost::shared_ptr<FNS> fns = boost::shared_ptr<FNS>(new FNS(fns1->uuid));
+	boost::shared_ptr<FNS> fns = boost::shared_ptr<FNS>(new FNS(fns1->uuid,fns1->forwarding));
 	fnsList.insert(pair<uint64_t, boost::shared_ptr<FNS> > (fns1->uuid, fns));
 	return getFNS(fns1->uuid);
 }

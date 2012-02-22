@@ -115,10 +115,21 @@ Disposition fns::handle_packet_in(const Event& e) {
 				mpls, key);
 		/*DROP packet*/
 	} else {
-		if (locator.insertClient(dl_src, ep))
-			locator.printLocations();
-		/*TODO fix buffer id -1*/
-		process_packet_in(ep, flow, b, buf_id);
+		boost::shared_ptr<FNS> fns = rules.getFNS(ep->fns_uuid);
+		switch (fns->getForwarding()){
+		case LIBNETVIRT_FORWARDING_L2:
+			if (locator.insertClient(dl_src, ep))
+				locator.printLocations();
+
+			process_packet_in_l2(fns, ep, flow, b, buf_id);
+			break;
+		case LIBNETVIRT_FORWARDING_L3:
+			/* TODO L3 */
+			break;
+		default:
+			break;
+		}
+
 	}
 
 	return CONTINUE;
@@ -157,7 +168,7 @@ void fns::send_pkt_to_all_fns(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoi
 	}
 }
 
-void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
+void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 		const Buffer& buff, int buf_id) {
 	boost::shared_ptr<EPoint> ep_dst;
 	ofp_match match;
@@ -167,7 +178,6 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 	uint32_t nw_dst, nw_src;
 	//buf_id = -1;
 	pair<int, int> ports;
-	boost::shared_ptr<FNS> fns = rules.getFNS(ep_src->fns_uuid);
 	boost::shared_ptr<Buffer> buff1;// = boost::shared_ptr<Buffer>();
 
 	lg.dbg(
@@ -211,7 +221,7 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 	}
 
 	/* Compute path from source*/
-	/* TODO Caching is required if the network is big*/
+	/* TODO Caching path is required if the network is big*/
 	if (finder.compute(ep_src->ep_id) < 0) {
 		printf("error computing path\n");
 		return;
@@ -832,8 +842,6 @@ int fns::remove_rule(boost::shared_ptr<FNSRule> rule) {
 	mod.instructions_num = 0;
 	mod.instructions = NULL;
 
-	/* XXX OK to do non-blocking send?  We do so with all other
-	 * commands on switch join */
 	if (send_openflow_msg(dpid, (struct ofl_msg_header *) &mod, 0/*xid*/, false)
 			== EAGAIN) {
 		lg.err("Error, unable to clear flow table on startup");

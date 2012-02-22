@@ -79,8 +79,6 @@ public:
 
 	void server();
 
-	void process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
-			const Buffer& buff, int buf_id);
 
 	int remove_rule(boost::shared_ptr<FNSRule> rule);
 
@@ -124,6 +122,10 @@ private:
 	RulesDB rules;
 	Locator locator;
 	uint64_t cookie;
+
+	void process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src, const Flow& flow,
+				const Buffer& buff, int buf_id);
+
 
 	void set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
 			vigil::ethernetaddr dl_src, uint16_t vlan);

@@ -62,8 +62,9 @@ private:
 
 class FNS{
 public:
-	FNS(uint64_t uuid);
+	FNS(uint64_t uuid, uint8_t forwarding);
 	uint64_t getUuid();
+	uint8_t getForwarding();
 	int numEPoints();
 	void addEPoint(boost::shared_ptr<EPoint> ep);
 	int removeEPoint(boost::shared_ptr<EPoint> ep);
@@ -71,6 +72,7 @@ public:
 
 private:
 	uint64_t uuid;
+	uint8_t forwarding;
 	vector<boost::shared_ptr<EPoint> > epoints;
 };
 
