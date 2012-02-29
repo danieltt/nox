@@ -125,6 +125,7 @@ Disposition fns::handle_packet_in(const Event& e) {
 			break;
 		case LIBNETVIRT_FORWARDING_L3:
 			/* TODO L3 */
+			process_packet_in_l3(fns, ep, flow, b, buf_id);
 			break;
 		default:
 			break;
@@ -168,6 +169,15 @@ void fns::send_pkt_to_all_fns(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoi
 	}
 }
 
+void fns::process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src, const Flow& flow,
+		const Buffer& buff, int buf_id) {
+
+	/* Capture ARP to router */
+
+	/* Modify header MAC router dst */
+
+
+}
 void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 		const Buffer& buff, int buf_id) {
 	boost::shared_ptr<EPoint> ep_dst;

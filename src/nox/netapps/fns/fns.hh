@@ -125,7 +125,8 @@ private:
 
 	void process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 				const Buffer& buff, int buf_id);
-
+	void process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src, const Flow& flow,
+					const Buffer& buff, int buf_id);
 
 	void set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
 			vigil::ethernetaddr dl_src, uint16_t vlan);
