@@ -328,7 +328,7 @@ class discovery(Component):
                 try:    
                     for port in packets[dp]:
                         #print 'Sending packet out of ',longlong_to_octstr(dp), ' port ',str(port)
-                        self.send_openflow_packet(dp, packets[dp][port].tostring(), port)
+                        self.send_openflow_packet(dp, packets[dp][port].tostring(), port, openflow.OFPP_NONE)
                         yield dp 
                 except Exception, e:
                     # catch exception while yielding
