@@ -21,6 +21,9 @@
 #include <cstdlib>
 #include "fns.hh"
 #include "libnetvirt/fns.h"
+#include <ctype.h>
+#include <sys/time.h>
+#include <fcntl.h>
 
 #include "packets.h"
 #include "packet_util.hh"
@@ -116,7 +119,7 @@ Disposition fns::handle_packet_in(const Event& e) {
 		/*DROP packet*/
 	} else {
 		boost::shared_ptr<FNS> fns = rules.getFNS(ep->fns_uuid);
-		switch (fns->getForwarding()){
+		switch (fns->getForwarding()) {
 		case LIBNETVIRT_FORWARDING_L2:
 			if (locator.insertClient(dl_src, ep))
 				locator.printLocations();
@@ -136,7 +139,8 @@ Disposition fns::handle_packet_in(const Event& e) {
 	return CONTINUE;
 }
 
-void fns::send_pkt_to_all_fns(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src,const Buffer& buff) {
+void fns::send_pkt_to_all_fns(boost::shared_ptr<FNS> fns, boost::shared_ptr<
+		EPoint> ep_src, const Buffer& buff) {
 	boost::shared_ptr<Buffer> buff1;// = boost::shared_ptr<Buffer>();
 	for (int j = 0; j < fns->numEPoints(); j++) {
 		boost::shared_ptr<EPoint> ep = fns->getEPoint(j);
@@ -169,17 +173,16 @@ void fns::send_pkt_to_all_fns(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoi
 	}
 }
 
-void fns::process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src, const Flow& flow,
-		const Buffer& buff, int buf_id) {
+void fns::process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<
+		EPoint> ep_src, const Flow& flow, const Buffer& buff, int buf_id) {
 
 	/* Capture ARP to router */
 
 	/* Modify header MAC router dst */
 
-
 }
-void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src, const Flow& flow,
-		const Buffer& buff, int buf_id) {
+void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
+		EPoint> ep_src, const Flow& flow, const Buffer& buff, int buf_id) {
 	boost::shared_ptr<EPoint> ep_dst;
 	ofp_match match;
 	vector<Node*> path;
@@ -992,115 +995,112 @@ int fns::remove_fns(fnsDesc* fns1) {
 	return 0;
 }
 
-void fns::server() {
+/* Server functions */
+/*
+void fns::setnonblocking(int sock) {
 
-	socklen_t addrlen;
-	struct sockaddr_in serv_addr, clientaddr;
-	int yes = 1;
-	int sockfd = 0;
-	int listener;
-	fd_set master; /* master file descriptor list */
-	fd_set read_fds; /* temp file descriptor list for select() */
-	int fdmax;
-	int newfd;
+	int opts;
+
+	opts = fcntl(sock, F_GETFL);
+	if (opts < 0) {
+		perror("fcntl(F_GETFL)");
+		exit(EXIT_FAILURE);
+	}
+	opts = (opts | O_NONBLOCK);
+	if (fcntl(sock, F_SETFL, opts) < 0) {
+		perror("fcntl(F_SETFL)");
+		exit(EXIT_FAILURE);
+	}
+	return;
+}*/
+
+
+void fns::build_select_list() {
+	int listnum; /* Current item in connectlist for for loops */
+
+	/* First put together fd_set for select(), which will
+	 consist of the sock veriable in case a new connection
+	 is coming in, plus all the sockets we have already
+	 accepted. */
+
+	/* FD_ZERO() clears out the fd_set called socks, so that
+	 it doesn't contain any file descriptors. */
+
+	FD_ZERO(&socks);
+
+	/* FD_SET() adds the file descriptor "sock" to the fd_set,
+	 so that select() will return if a connection comes in
+	 on that socket (which means you have to do accept(), etc. */
+
+	FD_SET(sock,&socks);
+
+	/* Loops through all the possible connections and adds
+	 those sockets to the fd_set */
+
+	for (listnum = 0; listnum < MAX_CONNECTIONS; listnum++) {
+		if (connectlist[listnum] != 0) {
+			FD_SET(connectlist[listnum],&socks);
+			if (connectlist[listnum] > highsock)
+				highsock = connectlist[listnum];
+		}
+	}
+}
+
+void fns::handle_new_connection() {
+	int listnum; /* Current item in connectlist for for loops */
+	int connection; /* Socket file descriptor for incoming connections */
+
+	/* We have a new connection coming in!  We'll
+	 try to find a spot for it in connectlist. */
+	connection = accept(sock, NULL, NULL);
+	if (connection < 0) {
+		perror("accept");
+		exit(EXIT_FAILURE);
+	}
+//	setnonblocking(connection);
+	for (listnum = 0; (listnum < MAX_CONNECTIONS) && (connection != -1); listnum++)
+		if (connectlist[listnum] == 0) {
+			lg.dbg("\nConnection accepted:   FD=%d; Slot=%d\n", connection,
+					listnum);
+			connectlist[listnum] = connection;
+			connection = -1;
+		}
+	if (connection != -1) {
+		/* No room left in the queue! */
+		printf("\nNo room left for new client.\n");
+		close(connection);
+	}
+}
+
+void fns::read_socks() {
+	int listnum; /* Current item in connectlist for for loops */
+	char buf[MSG_SIZE]; /* Buffer for socket reads */
 	int nbytes;
-	struct timeval tv;
-	uint8_t* buf;
-	int i;
+	/* OK, now socks will be set with whatever socket(s)
+	 are ready for reading.  Lets first check our
+	 "listening" socket, and then check the sockets
+	 in connectlist. */
 
-	listener = socket(AF_INET, SOCK_STREAM, 0);
-	if (listener < 0) {
-		perror("ERROR opening socket");
-		exit(1);
-	}
+	/* If a client is trying to connect() to our listening
+	 socket, select() will consider that as the socket
+	 being 'readable'. Thus, if the listening socket is
+	 part of the fd_set, we need to accept a new connection. */
 
-	bzero((char *) &serv_addr, sizeof(serv_addr));
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_addr.s_addr = INADDR_ANY;
-	serv_addr.sin_port = htons(server_port);
+	if (FD_ISSET(sock,&socks))
+		handle_new_connection();
+	/* Now check connectlist for available data */
 
-	if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-		perror("ERROR on setsockopt()");
-		exit(1);
-	}
+	/* Run through our sockets and check to see if anything
+	 happened with them, if so 'service' them. */
 
-	if (bind(listener, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-		close(listener);
-		perror("ERROR on binding");
-		exit(1);
-	}
-
-	if (listen(listener, MAX_CONNECTIONS) == -1) {
-		perror("ERROR on listen");
-		exit(1);
-	}
-
-	fdmax = listener; /* maximum file descriptor number */
-
-	/*Allocate reception buffer*/
-	buf = (uint8_t*) malloc(MSG_SIZE);
-	if (buf == NULL) {
-		perror("ERROR in malloc");
-		exit(1);
-	}
-
-	/* clear the master and temp sets */
-	FD_ZERO(&master);
-	FD_ZERO(&read_fds);
-
-	/* add the listener to the master set */
-	FD_SET(listener, &master);
-
-	/*Loop forever*/
-	while (1) {
-		/* copy it */
-		read_fds = master;
-
-		/*Set timeout*/
-		tv.tv_sec = SELECT_TIMEOUT;
-		tv.tv_usec = 0;
-		if (select(fdmax + 1, &read_fds, NULL, NULL, &tv) == -1) {
-			perror("Server-select()");
-			exit(1);
-		}
-
-		/*Check listening*/
-		if (FD_ISSET(listener, &read_fds)) {
-			addrlen = sizeof(clientaddr);
-			if ((newfd = accept(listener, (struct sockaddr *) &clientaddr,
-					(socklen_t *) &addrlen)) == -1) {
-				perror("Server-accept() error lol!");
-				continue;
-			}
-			FD_SET(newfd, &master); /* add to master set */
-			/*TODO manage multiple ports*/
-			sockfd = newfd;
-
-			if (newfd > fdmax)
-				fdmax = newfd;//* keep track of the maximum */
-
-			printf("New connection in %d\n", sockfd);
-
-		}
-		int s = sockfd;
-		if (FD_ISSET(s, &read_fds)) {
-			/*do the job*/
-			if ((nbytes = recv(s, buf, MSG_SIZE, 0)) <= 0) {
-				/* got error or connection closed by client */
-				if (nbytes == 0) {
-					/* connection closed */
-					printf("socket hung up\n");
-				} else {
-					perror("recv()");
-				}
+	for (listnum = 0; listnum < MAX_CONNECTIONS; listnum++) {
+		if (FD_ISSET(connectlist[listnum],&socks)){
+			if ((nbytes = recv(connectlist[listnum], buf, MSG_SIZE, 0)) <= 0) {
+				lg.dbg("socket hung up\n");
 				/* close it... */
-				close(s);
-				/* remove from master set */
-				FD_CLR(s, &master);
-				//} else if (nbytes < sizeof(struct msg_hdr)) {
-				//	lg.dbg("Too small packet");
+				close(connectlist[listnum]);
+				connectlist[listnum] = 0;
 			} else {
-				/* we got some data from a client*/
 				lg.dbg("New msg of size %d", nbytes);
 				unsigned int offset = 0;
 				do {
@@ -1119,43 +1119,108 @@ void fns::server() {
 						remove_fns(&msg->fns);
 						break;
 					case FNS_MSG_SW_IDS: {
-						/**TODO return IDs of the endpoints and num of ports*/
-						vector<Node*> nodeFinder = finder.getNodes();
-						lg.dbg("Current nodes in the controller:");
-						int size = sizeof(struct msg_ids) + nodeFinder.size()
-								* sizeof(endpoint);
-						struct msg_ids *msg1 = (struct msg_ids *) malloc(size);
-						memset(msg1, 0, size);
-						msg1->nEp = nodeFinder.size();
-						msg1->type = FNS_MSG_SW_IDS;
-						for (i = 0; i < nodeFinder.size(); i++) {
-							lg.dbg("ID: %lu: ports: %d", nodeFinder.at(i)->id,
-									nodeFinder.at(i)->ports);
-							msg1->endpoints[i].swId = nodeFinder.at(i)->id;
-							msg1->endpoints[i].port = nodeFinder.at(i)->ports;
-						}
-						if (write(s, msg1, size) < 0)
-							lg.err("Error sending packet");
+						/*TODO*/
 						break;
 					}
 					default:
-						lg.err("Invalid message of size %d: %s\n", nbytes,
-								(char*) buf);
+						lg.err("Invalid message of size %d: %s\n", nbytes, (char*) buf);
 						break;
 					}
 					offset += (msg->size);
 					lg.dbg("msg size %d %d", (msg->size), offset);
 
 				} while (offset < nbytes);
+				if(write(connectlist[listnum],"1",1)==0)
+					lg.dbg("error in response ok");
 			}
 		}
-	}
-	lg.dbg("Finishing server");
-	free(buf);
-	/*Close all sockets*/
-	close(listener);
-
+	} /* for (all entries in queue) */
 }
+
+void fns::server() {
+	struct sockaddr_in server_address; /* bind info structure */
+	int reuse_addr = 1; /* Used so we can re-bind to our port
+	 while a previous connection is still
+	 in TIME_WAIT state. */
+	struct timeval timeout; /* Timeout for select */
+	int readsocks; /* Number of sockets ready for reading */
+
+	/* Obtain a file descriptor for our "listening" socket */
+	sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock < 0) {
+		perror("socket");
+		exit(EXIT_FAILURE);
+	}
+	/* So that we can re-bind to it without TIME_WAIT problems */
+	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr));
+
+	/* Set socket to non-blocking with our setnonblocking routine */
+//	setnonblocking(sock);
+
+	memset((char *) &server_address, 0, sizeof(server_address));
+	server_address.sin_family = AF_INET;
+	server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+	server_address.sin_port = htons(server_port);
+	if (bind(sock, (struct sockaddr *) &server_address, sizeof(server_address))
+			< 0) {
+		perror("bind");
+		close(sock);
+		exit(EXIT_FAILURE);
+	}
+
+	/* Set up queue for incoming connections. */
+	listen(sock, MAX_CONNECTIONS);
+
+	/* Since we start with only one socket, the listening socket,
+	 it is the highest socket so far. */
+	highsock = sock;
+	memset((char *) &connectlist, 0, sizeof(connectlist));
+
+	while (1) { /* Main server loop - forever */
+		build_select_list();
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+
+		/* The first argument to select is the highest file
+		 descriptor value plus 1. In most cases, you can
+		 just pass FD_SETSIZE and you'll be fine. */
+
+		/* The second argument to select() is the address of
+		 the fd_set that contains sockets we're waiting
+		 to be readable (including the listening socket). */
+
+		/* The third parameter is an fd_set that you want to
+		 know if you can write on -- this example doesn't
+		 use it, so it passes 0, or NULL. The fourth parameter
+		 is sockets you're waiting for out-of-band data for,
+		 which usually, you're not. */
+
+		/* The last parameter to select() is a time-out of how
+		 long select() should block. If you want to wait forever
+		 until something happens on a socket, you'll probably
+		 want to pass NULL. */
+
+		readsocks = select(highsock + 1, &socks, (fd_set *) 0, (fd_set *) 0,
+				&timeout);
+
+		/* select() returns the number of sockets that had
+		 things going on with them -- i.e. they're readable. */
+
+		/* Once select() returns, the original fd_set has been
+		 modified so it now reflects the state of why select()
+		 woke up. i.e. If file descriptor 4 was originally in
+		 the fd_set, and then it became readable, the fd_set
+		 contains file descriptor 4 in it. */
+
+		if (readsocks < 0) {
+			perror("select");
+			exit(EXIT_FAILURE);
+		}
+		if (readsocks)
+			read_socks();
+	} /* while(1) */
+}
+
 void fns::configure(const Configuration* c) {
 	server_port = TCP_PORT;
 

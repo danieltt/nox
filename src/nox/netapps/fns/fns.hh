@@ -77,7 +77,6 @@ public:
 	Disposition handle_datapath_leave(const Event& e);
 	Disposition handle_packet_in(const Event& e);
 
-	void server();
 
 
 	int remove_rule(boost::shared_ptr<FNSRule> rule);
@@ -122,6 +121,21 @@ private:
 	RulesDB rules;
 	Locator locator;
 	uint64_t cookie;
+
+	int sock; /* The socket file descriptor for our "listening"
+	 socket */
+	int connectlist[MAX_CONNECTIONS]; /* Array of connected sockets so we know who
+	 we are talking to */
+	fd_set socks; /* Socket file descriptors we want to wake
+	 up for, using select() */
+	int highsock; /* Highest #'d file descriptor, needed for select() */
+
+	//void setnonblocking(int sock);
+	void build_select_list();
+	void handle_new_connection();
+	void read_socks();
+	void server();
+
 
 	void process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 				const Buffer& buff, int buf_id);
