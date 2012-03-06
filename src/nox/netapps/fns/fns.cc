@@ -124,6 +124,39 @@ Disposition fns::handle_packet_in(const Event& e) {
 	return CONTINUE;
 }
 
+void fns::send_pkt_to_all_fns(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src,const Buffer& buff) {
+	boost::shared_ptr<Buffer> buff1;// = boost::shared_ptr<Buffer>();
+	for (int j = 0; j < fns->numEPoints(); j++) {
+		boost::shared_ptr<EPoint> ep = fns->getEPoint(j);
+
+		if (ep->key == ep_src->key) {
+			continue;
+		}
+
+		/* VLAN MANIPULATION */
+		if (ep->vlan != ep_src->vlan && ep->vlan != fns::VLAN_NONE
+				&& ep_src->vlan != fns::VLAN_NONE) {
+			/* Change VLAN*/
+			lg.dbg("Sending VLAN SWAP");
+			buff1 = PacketUtil::pkt_swap_vlan(buff, ep->vlan);
+			forward_via_controller(ep->ep_id, buff1, ep->in_port);
+		} else if (ep_src->vlan != fns::VLAN_NONE && ep->vlan == fns::VLAN_NONE) {
+			/* Remove tag*/
+			lg.dbg("Sending VLAN POP");
+			buff1 = PacketUtil::pkt_pop_vlan(buff);
+			forward_via_controller(ep->ep_id, buff1, ep->in_port);
+		} else if (ep_src->vlan == fns::VLAN_NONE && ep->vlan != fns::VLAN_NONE) {
+			/* Append VLAN */
+			lg.dbg("Sending VLAN PUSH");
+			buff1 = PacketUtil::pkt_push_vlan(buff, ep->vlan);
+			forward_via_controller(ep->ep_id, buff1, ep->in_port);
+		} else {
+
+			forward_via_controller(ep->ep_id, buff, ep->in_port);
+		}
+	}
+}
+
 void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 		const Buffer& buff, int buf_id) {
 	boost::shared_ptr<EPoint> ep_dst;
@@ -131,6 +164,7 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 	vector<Node*> path;
 	int in_port = 0, out_port = 0;
 	int psize;
+	uint32_t nw_dst, nw_src;
 	//buf_id = -1;
 	pair<int, int> ports;
 	boost::shared_ptr<FNS> fns = rules.getFNS(ep_src->fns_uuid);
@@ -143,46 +177,22 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 #ifdef NOX_OF10
 	ethernetaddr dl_dst = ethernetaddr(flow.dl_dst);
 	ethernetaddr dl_src = ethernetaddr(flow.dl_src);
+	nw_dst = flow.nw_dst;
+	nw_src = flow.nw_src;
 	if (flow.dl_type == ethernet::ARP && dl_dst.is_broadcast()) {
 #else
 		ethernetaddr dl_dst = ethernetaddr(flow.match.dl_dst);
 		ethernetaddr dl_src = ethernetaddr(flow.match.dl_src);
+		nw_dst = flow.match.nw_dst;
+		nw_src = flow.match.nw_src;
 		if (flow.match.dl_type == ETH_TYPE_ARP && dl_dst.is_broadcast()) {
 #endif
 		lg.dbg("Sending ARP to all %d endpoints: src %s dst: %s",
 				fns->numEPoints(), dl_src.string().c_str(),
 				dl_dst.string().c_str());
-		for (int j = 0; j < fns->numEPoints(); j++) {
-			boost::shared_ptr<EPoint> ep = fns->getEPoint(j);
 
-			if (ep->key == ep_src->key) {
-				continue;
-			}
+		send_pkt_to_all_fns(fns, ep_src, buff);
 
-			/* VLAN MANIPULATION */
-			if (ep->vlan != ep_src->vlan && ep->vlan != fns::VLAN_NONE
-					&& ep_src->vlan != fns::VLAN_NONE) {
-				/* Change VLAN*/
-				lg.dbg("Sending VLAN SWAP");
-				buff1 = PacketUtil::pkt_swap_vlan(buff, ep->vlan);
-				forward_via_controller(ep->ep_id, buff1, ep->in_port);
-			} else if (ep_src->vlan != fns::VLAN_NONE && ep->vlan
-					== fns::VLAN_NONE) {
-				/* Remove tag*/
-				lg.dbg("Sending VLAN POP");
-				buff1 = PacketUtil::pkt_pop_vlan(buff);
-				forward_via_controller(ep->ep_id, buff1, ep->in_port);
-			} else if (ep_src->vlan == fns::VLAN_NONE && ep->vlan
-					!= fns::VLAN_NONE) {
-				/* Append VLAN */
-				lg.dbg("Sending VLAN PUSH");
-				buff1 = PacketUtil::pkt_push_vlan(buff, ep->vlan);
-				forward_via_controller(ep->ep_id, buff1, ep->in_port);
-			} else {
-
-				forward_via_controller(ep->ep_id, buff, ep->in_port);
-			}
-		}
 		return;
 	}
 
@@ -192,6 +202,11 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 		lg.warn("NO destination for this packet in the LOCATOR: %s",
 				dl_dst.string().c_str());
 		locator.printLocations();
+		/* Send ARP request */
+		lg.dbg("creating ARP request");
+		buff1 = PacketUtil::pkt_arp_request(nw_src, nw_dst, dl_src.octet);
+		send_pkt_to_all_fns(fns, ep_src, *buff1.get());
+
 		return;
 	}
 

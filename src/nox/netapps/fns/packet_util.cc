@@ -21,6 +21,64 @@
 #include "packets.h"
 #include "netinet++/ethernet.hh"
 
+boost::shared_ptr<Buffer> PacketUtil::pkt_arp_request(uint32_t nw_src,
+		uint32_t nw_dst, uint8_t dl_src[]) {
+	struct eth_header* eth;
+	struct arp_eth_header* arp;
+	size_t size = sizeof(struct eth_header) + sizeof(struct arp_eth_header);
+	uint8_t *pkt = new uint8_t[size];
+	memset(pkt, 0, size);
+
+	eth = (struct eth_header*) pkt;
+	eth->eth_type = htons(ETH_TYPE_ARP);
+	memset(eth->eth_dst, 0xff, 6);
+	memcpy(eth->eth_src, dl_src, sizeof(eth->eth_src));
+	arp = (struct arp_eth_header*) ((uint8_t*)pkt + sizeof(struct eth_header));
+	/* Generic members. */
+	arp->ar_hrd = htons(1); 		/* Hardware type. */
+	arp->ar_pro = htons(0x0800); 	/* Protocol type. */
+	arp->ar_hln = 6; 				/* Hardware address length. */
+	arp->ar_pln = 4;				/* Protocol address length. */
+	arp->ar_op = htons(1); 			/* Opcode. */
+
+	/* Ethernet+IPv4 specific members. */
+	memcpy(arp->ar_sha, dl_src, sizeof(arp->ar_sha)); 	/* Sender hardware address. */
+	arp->ar_spa=nw_src; 								/* Sender protocol address. */
+	//uint8_t ar_tha[ETH_ADDR_LEN]; 					/* Target hardware address. */
+	arp->ar_tpa=nw_dst; 								/* Target protocol address. */
+
+	return boost::shared_ptr<Buffer>(new Array_buffer(pkt, size));
+}
+
+boost::shared_ptr<Buffer> PacketUtil::pkt_arp_reply(uint32_t nw_src,
+		uint32_t nw_dst, uint8_t dl_src[], uint8_t dl_dst[]) {
+	struct eth_header* eth;
+	struct arp_eth_header* arp;
+	size_t size = sizeof(struct eth_header) + sizeof(struct arp_eth_header);
+	uint8_t *pkt = new uint8_t[size];
+	memset(pkt, 0, size);
+
+	eth = (struct eth_header*) pkt;
+	eth->eth_type = htons(ETH_TYPE_ARP);
+	memset(eth->eth_dst, 0xff, 6);
+	memcpy(eth->eth_src, dl_src, sizeof(eth->eth_src));
+	arp = (struct arp_eth_header*) ((uint8_t*)pkt + sizeof(struct eth_header));
+	/* Generic members. */
+	arp->ar_hrd = htons(1); 		/* Hardware type. */
+	arp->ar_pro = htons(0x0800); 	/* Protocol type. */
+	arp->ar_hln = 6; 				/* Hardware address length. */
+	arp->ar_pln = 4;				/* Protocol address length. */
+	arp->ar_op = htons(2); 			/* Opcode. */
+
+	/* Ethernet+IPv4 specific members. */
+	memcpy(arp->ar_sha, dl_src, sizeof(arp->ar_sha)); 	/* Sender hardware address. */
+	arp->ar_spa=nw_src; 								/* Sender protocol address. */
+	memcpy(arp->ar_tha, dl_dst, sizeof(arp->ar_tha));  	/* Target hardware address. */
+	arp->ar_tpa=nw_dst;									/* Target protocol address. */
+
+	return boost::shared_ptr<Buffer>(new Array_buffer(pkt, size));
+}
+
 boost::shared_ptr<Buffer> PacketUtil::pkt_swap_vlan(const Buffer& buff,
 		uint16_t vlanid) {
 	struct eth_header* eth;
