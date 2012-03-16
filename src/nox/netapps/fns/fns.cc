@@ -320,6 +320,7 @@ void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 		lg.dbg("creating ARP request");
 		buff1 = PacketUtil::pkt_arp_request(nw_src, nw_dst, dl_src.octet);
 		send_pkt_to_all_fns(fns, ep_src, *buff1.get());
+		send_pkt_to_all_fns(fns, ep_src, buff);
 
 		return;
 	}
@@ -969,7 +970,7 @@ void fns::forward_via_controller(uint64_t id, boost::shared_ptr<Buffer> buff,
 #endif
 }
 void fns::forward_via_controller(uint64_t id, const Buffer &buff, int port) {
-	lg.warn("ATTENTION. Sending packet directly to the destination: %lu :%d",
+	lg.dbg("ATTENTION. Sending packet directly to the destination: %lu :%d",
 			id, port);
 
 #ifdef NOX_OF10
