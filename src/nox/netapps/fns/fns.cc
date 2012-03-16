@@ -314,7 +314,7 @@ void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 	/*Get location of destination*/
 	ep_dst = fns->getLocation(dl_dst);
 	if (ep_dst == NULL) {
-		lg.warn("NO destination for this packet in the LOCATOR: %s",
+		lg.dbg("NO destination for this packet in the LOCATOR: %s",
 				dl_dst.string().c_str());
 		/* Send ARP request */
 		lg.dbg("creating ARP request");
