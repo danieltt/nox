@@ -460,7 +460,7 @@ void fns::set_mod_def(struct ofp_flow_mod *ofm, int p_out, int buf) {
 ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
 		vigil::ethernetaddr dl_src, int buf, uint16_t vlan, uint32_t mpls) {
 	datapathid src;
-	lg.warn("Installing new path: %ld: %d ->  %s\n", id, p_out,
+	lg.dbg("Installing new path: %ld: %d ->  %s\n", id, p_out,
 			dl_dst.string().c_str());
 
 	/*OpenFlow command initialization*/
@@ -501,7 +501,7 @@ ofp_match fns::install_rule_vlan_pop(uint64_t id, int p_out,
 		vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf,
 		uint32_t vlan) {
 	datapathid src;
-	lg.warn("Installing new path POP %d : %ld: %d ->  %s\n", vlan, id, p_out,
+	lg.dbg("Installing new path POP %d : %ld: %d ->  %s\n", vlan, id, p_out,
 			dl_dst.string().c_str());
 
 	/*OpenFlow command initialization*/
@@ -541,7 +541,7 @@ ofp_match fns::install_rule_vlan_swap(uint64_t id, int p_out,
 		vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf,
 		uint32_t tag_in, uint32_t tag_out) {
 	datapathid src;
-	lg.warn("Installing new path SWAP %d > %d: %ld: %d ->  %s\n", tag_in,
+	lg.dbg("Installing new path SWAP %d > %d: %ld: %d ->  %s\n", tag_in,
 			tag_out, id, p_out, dl_dst.string().c_str());
 
 	/*OpenFlow command initialization*/
@@ -582,7 +582,7 @@ int fns::remove_rule(boost::shared_ptr<FNSRule> rule) {
 	datapathid src;
 	ofp_action_list actlist;
 
-	lg.warn("Removing rule from switch: %lu", rule->sw_id);
+	lg.dbg("Removing rule from switch: %lu", rule->sw_id);
 	/*OpenFlow command initialization*/
 	ofp_flow_mod* ofm;
 	size_t size = sizeof *ofm;
