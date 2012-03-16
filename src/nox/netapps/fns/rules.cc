@@ -30,10 +30,13 @@ EPoint::EPoint(uint64_t ep_id, uint32_t in_port, uint16_t vlan,
 	ep_id(ep_id), in_port(in_port), vlan(vlan), fns_uuid(fns_uuid) {
 	key = generate_key(ep_id, in_port, vlan, 0);
 	mpls = 0;
+	address = 0;
+	mask = 0;
 }
 EPoint::EPoint(uint64_t ep_id, uint32_t in_port, uint16_t vlan,
-		uint64_t fns_uuid, uint32_t mpls) :
-	ep_id(ep_id), in_port(in_port), vlan(vlan), fns_uuid(fns_uuid), mpls(mpls) {
+		uint64_t fns_uuid, uint32_t mpls, uint32_t address, uint8_t mask) :
+	ep_id(ep_id), in_port(in_port), vlan(vlan), fns_uuid(fns_uuid), mpls(mpls),
+			address(address), mask(mask) {
 	key = generate_key(ep_id, in_port, vlan, mpls);
 }
 
@@ -75,6 +78,10 @@ uint8_t FNS::getForwarding() {
 void FNS::addEPoint(boost::shared_ptr<EPoint> ep) {
 	//	printf("Adding ep: %d %d\n",ep->ep_id, ep->in_port);
 	epoints.push_back(ep);
+	if (forwarding == LIBNETVIRT_FORWARDING_L3) {
+		/* Add route to routing table */
+		table.addNet(Route_entry(htonl(ep->address), ep->mask, ep));
+	}
 }
 
 int FNS::removeEPoint(boost::shared_ptr<EPoint> ep) {
@@ -92,10 +99,44 @@ boost::shared_ptr<EPoint> FNS::getEPoint(int pos) {
 	return epoints.at(pos);
 }
 
+boost::shared_ptr<EPoint> FNS::lookup(uint32_t addr) {
+	return table.getEndpoint(addr);
+}
+
+bool FNS::addlocation(vigil::ethernetaddr addr, boost::shared_ptr<EPoint> ep) {
+	return l2table.insertClient(addr, ep);
+}
+boost::shared_ptr<EPoint> FNS::getLocation(vigil::ethernetaddr addr) {
+	return l2table.getLocation(addr);
+}
+
+bool FNS::addMAC(uint32_t ip, vigil::ethernetaddr mac) {
+	if (mactable.size() != 0) {
+		map<uint32_t, vigil::ethernetaddr >::iterator epr = mactable.find(ip);
+		if (mactable.end() != epr) {
+			/* Update value */
+			epr->second = mac;
+			return true;
+		}
+	}
+	/* Add value */
+	mactable.insert(pair<uint32_t, vigil::ethernetaddr> (ip, mac));
+	return true;
+}
+
+vigil::ethernetaddr FNS::getMAC(uint32_t ip) {
+	map<uint32_t, vigil::ethernetaddr>::iterator epr =
+			mactable.find(ip);
+	if (mactable.end() == epr)
+		return vigil::ethernetaddr();
+	return epr->second;
+}
+
 /*RulesDB class*/
 uint64_t RulesDB::addEPoint(endpoint* ep, boost::shared_ptr<FNS> fns) {
 	boost::shared_ptr<EPoint> epoint = boost::shared_ptr<EPoint>(new EPoint(
-			ep->swId, ep->port, ep->vlan, fns->getUuid(),ep->mpls));
+			ep->swId, ep->port, ep->vlan, fns->getUuid(), ep->mpls,
+			ep->address, ep->mask));
 	//	printf("Adding %ld\n",ep->id);
 	boost::shared_ptr<EPoint> node = getEpoint(epoint->key);
 	if (node == NULL) {
@@ -124,7 +165,8 @@ boost::shared_ptr<EPoint> RulesDB::getEpoint(uint64_t id) {
 }
 
 boost::shared_ptr<FNS> RulesDB::addFNS(fnsDesc* fns1) {
-	boost::shared_ptr<FNS> fns = boost::shared_ptr<FNS>(new FNS(fns1->uuid,fns1->forwarding));
+	boost::shared_ptr<FNS> fns = boost::shared_ptr<FNS>(new FNS(fns1->uuid,
+			fns1->forwarding));
 	fnsList.insert(pair<uint64_t, boost::shared_ptr<FNS> > (fns1->uuid, fns));
 	return getFNS(fns1->uuid);
 }
@@ -151,10 +193,10 @@ bool Locator::validateAddr(vigil::ethernetaddr addr) {
 	/*Check if ethernetaddr exists*/
 	if (clients.size() == 0)
 		return true;
-		map<vigil::ethernetaddr, boost::shared_ptr<EPoint> >::iterator epr =
-				clients.find(addr);
+	map<vigil::ethernetaddr, boost::shared_ptr<EPoint> >::iterator epr =
+			clients.find(addr);
 	if (clients.end() == epr) {
-			return true;
+		return true;
 	}
 
 	return false;
@@ -170,15 +212,14 @@ bool Locator::insertClient(vigil::ethernetaddr addr,
 	if (clients.end() != epr) {
 		/* Update value */
 		epr->second = ep;
-	}else{
+	} else {
 		/* Add value */
-		clients.insert(pair<vigil::ethernetaddr, boost::shared_ptr<EPoint> > (addr,
-			ep));
+		clients.insert(pair<vigil::ethernetaddr, boost::shared_ptr<EPoint> > (
+				addr, ep));
 	}
 
 	return true;
 }
-
 
 boost::shared_ptr<EPoint> Locator::getLocation(vigil::ethernetaddr addr) {
 	if (clients.size() == 0) {

@@ -19,11 +19,12 @@
 #ifndef ROUTE_HH_
 #define ROUTE_HH_
 #include <boost/smart_ptr/shared_ptr.hpp>
-#include "rules.hh"
+#include "EPoint.hh"
 #include <list>
 
 class Route_entry{
 public:
+	Route_entry(uint32_t prefix, short mask, boost::shared_ptr<EPoint> endpoint);
 	uint32_t prefix;
 	short mask;
 	boost::shared_ptr<EPoint> endpoint;
@@ -49,6 +50,7 @@ public:
 
 private:
 	std::list<Route_entry> table;
+	std::map<uint32_t,uint8_t*> arp;
 
 };
 #endif /* PACKET_HH_ */

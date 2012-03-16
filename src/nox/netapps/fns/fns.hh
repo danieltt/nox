@@ -33,6 +33,7 @@
 #include "openflow-default.hh"
 
 #include "rules.hh"
+#include "EPoint.hh"
 #include "libnetvirt/fns.h"
 #include "PathFinder.hh"
 
@@ -119,7 +120,8 @@ private:
 	int server_port;
 	PathFinder finder;
 	RulesDB rules;
-	Locator locator;
+
+	//Locator locator;
 	uint64_t cookie;
 
 	int sock; /* The socket file descriptor for our "listening"

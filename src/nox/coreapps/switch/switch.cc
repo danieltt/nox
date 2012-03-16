@@ -158,6 +158,8 @@ Switch::handle(const Event& e)
 
     /* Set up a flow if the output port is known. */
     if (setup_flows && out_port != -1) {
+    	VLOG_DBG(log, "Setup flow on datapath %s port %d", pi.datapath_id.string().c_str(),
+                (int) pi.in_port);
         ofp_flow_mod* ofm;
         size_t size = sizeof *ofm + sizeof(ofp_action_output);
         boost::shared_array<char> raw_of(new char[size]);

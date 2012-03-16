@@ -18,41 +18,53 @@
  */
 
 #include "route.hh"
-
-
-bool Route_entry::compare_entry(Route_entry first, Route_entry second){
-	if(first.mask < second.mask)
-		return true;
-	if(first.mask > second.mask)
-		return false;
-	if(first.prefix < second.prefix)
-		return true;
-	else return false;
+#include "vlog.hh"
+static vigil::Vlog_module lg("route");
+Route_entry::Route_entry(uint32_t prefix, short mask,
+		boost::shared_ptr<EPoint> endpoint) :
+	prefix(prefix), mask(mask), endpoint(endpoint) {
 }
 
-boost::shared_ptr<EPoint> RouteTable::getEndpoint(uint32_t target_addr){
+bool Route_entry::compare_entry(Route_entry first, Route_entry second) {
+	if (first.mask < second.mask)
+		return true;
+	if (first.mask > second.mask)
+		return false;
+	if (first.prefix < second.prefix)
+		return true;
+	else
+		return false;
+}
+
+boost::shared_ptr<EPoint> RouteTable::getEndpoint(uint32_t target_addr) {
 	list<Route_entry>::iterator it;
-	for (it=table.begin(); it!=table.end(); ++it){
-		if(it->prefix == (target_addr & bitmask[it->mask]))
+//	lg.dbg("Lookup for: %u", target_addr);
+//	lg.dbg("Routing table size: %lu", table.size());
+	for (it = table.begin(); it != table.end(); ++it) {
+//		lg.dbg("Entry: %u %d", it->prefix, it->mask);
+//		lg.dbg("Entry with mask: %u %d", (it->prefix & bitmask[it->mask]),
+//				(target_addr & bitmask[it->mask]));
+		if ((it->prefix & bitmask[it->mask]) == (target_addr
+				& bitmask[it->mask]))
 			return it->endpoint;
 	}
 	return boost::shared_ptr<EPoint>();
 }
-void RouteTable::addNet(Route_entry entry){
+void RouteTable::addNet(Route_entry entry) {
 	table.push_front(entry);
 	table.sort(Route_entry::compare_entry);
 }
-void RouteTable::removeNet(uint32_t prefix, short mask){
+void RouteTable::removeNet(uint32_t prefix, short mask) {
 	list<Route_entry>::iterator it;
-	for (it=table.begin(); it!=table.end(); ++it){
-			if(it->mask == prefix && it->prefix == mask)
-				table.erase(it);
+	for (it = table.begin(); it != table.end(); ++it) {
+		if (it->mask == prefix && it->prefix == mask)
+			table.erase(it);
 	}
 }
-void RouteTable::removeEndoint(boost::shared_ptr<EPoint> epoint){
+void RouteTable::removeEndoint(boost::shared_ptr<EPoint> epoint) {
 	list<Route_entry>::iterator it;
-		for (it=table.begin(); it!=table.end(); ++it){
-				if(it->endpoint == epoint)
-					table.erase(it);
-		}
+	for (it = table.begin(); it != table.end(); ++it) {
+		if (it->endpoint == epoint)
+			table.erase(it);
+	}
 }

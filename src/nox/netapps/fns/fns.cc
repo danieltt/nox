@@ -121,13 +121,11 @@ Disposition fns::handle_packet_in(const Event& e) {
 		boost::shared_ptr<FNS> fns = rules.getFNS(ep->fns_uuid);
 		switch (fns->getForwarding()) {
 		case LIBNETVIRT_FORWARDING_L2:
-			if (locator.insertClient(dl_src, ep))
-				locator.printLocations();
+			fns->addlocation(dl_src, ep);
 
 			process_packet_in_l2(fns, ep, flow, b, buf_id);
 			break;
 		case LIBNETVIRT_FORWARDING_L3:
-			/* TODO L3 */
 			process_packet_in_l3(fns, ep, flow, b, buf_id);
 			break;
 		default:
@@ -175,10 +173,104 @@ void fns::send_pkt_to_all_fns(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 
 void fns::process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 		EPoint> ep_src, const Flow& flow, const Buffer& buff, int buf_id) {
+	boost::shared_ptr<Buffer> arp;
+	boost::shared_ptr<EPoint> ep_dst;
+	lg.dbg("L3 FNS. Packet in %ld:%d", ep_src->ep_id, ep_src->in_port);
+	vigil::ethernetaddr dl_dst,dl_src;
+	uint32_t nw_dst = ntohl(flow.nw_dst);
+	fns->addMAC(nw_dst, flow.dl_src);
+	vector<Node*> path;
+	int in_port = 0, out_port = 0;
+	int psize;
+	pair<int, int> ports;
+	ofp_match match;
 
-	/* Capture ARP to router */
+	/* Capture ARP to gateway and reply */
+	uint8_t mac[] = { 0x00, 0xAA, 0x05, 0x00, 0x00, 0x10 };
 
-	/* Modify header MAC router dst */
+	if (flow.dl_type == ethernet::ARP && nw_dst == ep_src->address) {
+		if (flow.nw_dst == ep_src->address) {
+			lg.dbg("We have an ARP to Gateway. Replying");
+			arp = PacketUtil::pkt_arp_reply(ep_src->address, flow.nw_src, mac,
+					(uint8_t*) flow.dl_src.octet);
+			forward_via_controller(ep_src->ep_id, arp, ep_src->in_port);
+		} else {
+			lg.dbg("The ARP is not for the gateway. We drop it");
+		}
+		return;
+	}
+
+	ep_dst = fns->lookup(nw_dst);
+	if (ep_dst == NULL) {
+		lg.dbg("Destination network not found");
+		return;
+	}
+
+	lg.dbg("Destination is in %ld:%d", ep_dst->ep_id, ep_dst->in_port);
+	/* Send ARP request and store destination */
+	arp = PacketUtil::pkt_arp_request(ep_dst->address, flow.nw_dst, mac);
+	forward_via_controller(ep_dst->ep_id, arp, ep_dst->in_port);
+
+	/* Compute path */
+	if (finder.compute(ep_src->ep_id) < 0) {
+		printf("error computing path\n");
+		return;
+	}
+	dl_dst = fns->getMAC(nw_dst);
+
+	lg.dbg("Destination for %u is %d-%d-%d-%d-%d-%d", nw_dst, dl_dst.octet[0],
+			dl_dst.octet[1], dl_dst.octet[2], dl_dst.octet[3], dl_dst.octet[4],
+			dl_dst.octet[5]);
+
+	/* We don't know the MAC address of the destination, so we wait for it */
+	/*Get shortest path*/
+	path = finder.getPath(ep_dst->ep_id);
+	psize = path.size();
+
+	/*Install specific rules with src and destination L2*/
+	for (int k = 0; k < psize; k++) {
+		int bufid = -1;
+		if (psize == 1) {
+			/*Endpoint in the same node*/
+			ports = pair<int, int> (ep_dst->in_port, ep_src->in_port);
+		} else if (k < psize - 1) {
+			ports = path.at(k)->getPortTo(path.at(k + 1));
+			lg.dbg("in %d out: %d", ports.first, ports.second);
+		}
+		out_port = ports.first;
+
+		if (k == 0) {
+			in_port = ep_dst->in_port;
+		}
+
+		if (k == path.size() - 1) {
+			out_port = ep_src->in_port;
+		}
+
+		match = install_rule(path.at(k)->id, out_port, dl_src, dl_dst, bufid,
+				ep_src->vlan, 0);
+
+		/* Keeping track of the installed rules */
+		boost::shared_ptr<FNSRule> rule = boost::shared_ptr<FNSRule>(
+				new FNSRule(path.at(k)->id, match));
+		ep_src->addRule(rule);
+		ep_dst->addRule(rule);
+
+		if (k == path.size() - 1) {
+			bufid = buf_id;
+			lg.dbg("Setting buff id to %d", bufid);
+		}
+		match = install_rule(path.at(k)->id, in_port, dl_dst, dl_src, bufid,
+				ep_dst->vlan, 0);
+
+		/* Keeping track of the installed rules */
+		rule = boost::shared_ptr<FNSRule>(new FNSRule(path.at(k)->id, match));
+		ep_src->addRule(rule);
+		ep_dst->addRule(rule);
+
+		in_port = ports.second;
+
+	}
 
 }
 void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
@@ -220,11 +312,10 @@ void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 	}
 
 	/*Get location of destination*/
-	ep_dst = locator.getLocation(dl_dst);
+	ep_dst = fns->getLocation(dl_dst);
 	if (ep_dst == NULL) {
 		lg.warn("NO destination for this packet in the LOCATOR: %s",
 				dl_dst.string().c_str());
-		locator.printLocations();
 		/* Send ARP request */
 		lg.dbg("creating ARP request");
 		buff1 = PacketUtil::pkt_arp_request(nw_src, nw_dst, dl_src.octet);
@@ -960,6 +1051,7 @@ int fns::save_fns(fnsDesc* fns1) {
 	}
 	fns = rules.addFNS(fns1);
 
+	lg.dbg("Type: %d", fns1->forwarding);
 	for (int i = 0; i < fns1->nEp; i++) {
 		/*Save endpoints and compute path*/
 		endpoint *ep = GET_ENDPOINT(fns1, i);
@@ -997,23 +1089,22 @@ int fns::remove_fns(fnsDesc* fns1) {
 
 /* Server functions */
 /*
-void fns::setnonblocking(int sock) {
+ void fns::setnonblocking(int sock) {
 
-	int opts;
+ int opts;
 
-	opts = fcntl(sock, F_GETFL);
-	if (opts < 0) {
-		perror("fcntl(F_GETFL)");
-		exit(EXIT_FAILURE);
-	}
-	opts = (opts | O_NONBLOCK);
-	if (fcntl(sock, F_SETFL, opts) < 0) {
-		perror("fcntl(F_SETFL)");
-		exit(EXIT_FAILURE);
-	}
-	return;
-}*/
-
+ opts = fcntl(sock, F_GETFL);
+ if (opts < 0) {
+ perror("fcntl(F_GETFL)");
+ exit(EXIT_FAILURE);
+ }
+ opts = (opts | O_NONBLOCK);
+ if (fcntl(sock, F_SETFL, opts) < 0) {
+ perror("fcntl(F_SETFL)");
+ exit(EXIT_FAILURE);
+ }
+ return;
+ }*/
 
 void fns::build_select_list() {
 	int listnum; /* Current item in connectlist for for loops */
@@ -1057,7 +1148,7 @@ void fns::handle_new_connection() {
 		perror("accept");
 		exit(EXIT_FAILURE);
 	}
-//	setnonblocking(connection);
+	//	setnonblocking(connection);
 	for (listnum = 0; (listnum < MAX_CONNECTIONS) && (connection != -1); listnum++)
 		if (connectlist[listnum] == 0) {
 			lg.dbg("\nConnection accepted:   FD=%d; Slot=%d\n", connection,
@@ -1094,7 +1185,7 @@ void fns::read_socks() {
 	 happened with them, if so 'service' them. */
 
 	for (listnum = 0; listnum < MAX_CONNECTIONS; listnum++) {
-		if (FD_ISSET(connectlist[listnum],&socks)){
+		if (FD_ISSET(connectlist[listnum],&socks)) {
 			if ((nbytes = recv(connectlist[listnum], buf, MSG_SIZE, 0)) <= 0) {
 				lg.dbg("socket hung up\n");
 				/* close it... */
@@ -1123,14 +1214,15 @@ void fns::read_socks() {
 						break;
 					}
 					default:
-						lg.err("Invalid message of size %d: %s\n", nbytes, (char*) buf);
+						lg.err("Invalid message of size %d: %s\n", nbytes,
+								(char*) buf);
 						break;
 					}
 					offset += (msg->size);
 					lg.dbg("msg size %d %d", (msg->size), offset);
 
 				} while (offset < nbytes);
-				if(write(connectlist[listnum],"1",1)==0)
+				if (write(connectlist[listnum], "1", 1) == 0)
 					lg.dbg("error in response ok");
 			}
 		}
@@ -1155,7 +1247,7 @@ void fns::server() {
 	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr));
 
 	/* Set socket to non-blocking with our setnonblocking routine */
-//	setnonblocking(sock);
+	//	setnonblocking(sock);
 
 	memset((char *) &server_address, 0, sizeof(server_address));
 	server_address.sin_family = AF_INET;
