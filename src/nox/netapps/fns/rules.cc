@@ -55,11 +55,8 @@ void EPoint::installed_pop() {
 
 uint64_t EPoint::generate_key(uint64_t sw_id, uint32_t port, uint16_t vlan,
 		uint32_t mpls) {
-	size_t seed = 0;
-	boost::hash_combine(seed, port);
-	boost::hash_combine(seed, sw_id);
-	boost::hash_combine(seed, vlan);
-	boost::hash_combine(seed, mpls);
+	uint64_t seed = ((0xFFFFFFFF & sw_id) << 32) + (port << 16) + vlan + mpls;
+
 	return seed;
 }
 
