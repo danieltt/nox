@@ -77,6 +77,44 @@ void PathFinder::addEdge(uint64_t node1, uint64_t node2, LinkAtr* atr1,
 }
 
 void PathFinder::removeEdge(uint64_t node1, uint64_t node2) {
+	Node* n1;
+	Node* n2;
+	map<uint64_t, Node*>::iterator epr;
+	vector<pair<Node*, LinkAtr*> > tmp;
+	vector<pair<Node*, LinkAtr*> > tmp1;
+	pair<Node*, LinkAtr*> tmppair;
+
+	if (nodes.size() == 0) {
+		return;
+	}
+
+	epr = nodes.find(node1);
+	if (nodes.end() == epr)
+		return;
+	else
+		n1 = epr->second;
+
+	epr = nodes.find(node2);
+	if (nodes.end() == epr)
+		return;
+	else
+		n2 = epr->second;
+
+	while(!n1->adjacentNodes.empty()){
+		tmppair = n1->adjacentNodes.back();
+		n1->adjacentNodes.pop_back();
+		if(tmppair.first != n2)
+			tmp.push_back(tmppair);
+	}
+	n1->adjacentNodes = tmp;
+
+	while(!n2->adjacentNodes.empty()){
+		tmppair = n2->adjacentNodes.back();
+		n2->adjacentNodes.pop_back();
+		if(tmppair.first != n1)
+			tmp1.push_back(tmppair);
+	}
+	n2->adjacentNodes = tmp1;
 
 }
 int PathFinder::compute(uint64_t source) {
