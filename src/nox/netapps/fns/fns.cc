@@ -42,14 +42,65 @@ static Vlog_module lg("fns");
 Disposition fns::handle_link_event(const Event& e) {
 	const Link_event& le = assert_cast<const Link_event&> (e);
 	int cost = 1;
-	lg.dbg("Adding link: %lu:%u -> %lu:%u", le.dpsrc.as_host(), le.sport,
+	lg.dbg("Adding link %d: %lu:%u -> %lu:%u", le.action, le.dpsrc.as_host(), le.sport,
 			le.dpdst.as_host(), le.dport);
 	if (le.action == le.ADD) {
 		finder.addEdge(le.dpsrc.as_host(), le.dpdst.as_host(), new LinkAtr(
 				cost, le.sport, le.dport),
 				new LinkAtr(cost, le.dport, le.sport));
 	}
+	if (le.action == le.REMOVE) {
+		finder.removeEdge(le.dpsrc.as_host(), le.dpdst.as_host());
+	}
 	return CONTINUE;
+}
+
+Disposition fns::handle_port_event(const Event& e) {
+	const Port_status_event& pe = assert_cast<const Port_status_event&> (e);
+
+	if(pe.port.state){
+		lg.dbg("port %lu:%d is down. We need to Reroute traffic", pe.datapath_id.as_host(),pe.port.port_no);
+		send_flow_stats_req(pe.datapath_id, pe.port.port_no);
+	}
+	return CONTINUE;
+}
+
+Disposition fns::handle_flow_stats_in_event(const Event& e) {
+	const Flow_stats_in_event& fe = assert_cast<const Flow_stats_in_event&> (e);
+
+	lg.dbg("flow stats event: %lu. Affected flows: %lu", fe.datapath_id.as_host(), fe.flows.size());
+
+
+	return CONTINUE;
+}
+
+int fns::send_flow_stats_req(datapathid src, int port){
+	lg.dbg("Sending flow stats req to : %ld", src.as_host());;
+
+	/*OpenFlow command initialization*/
+	ofp_stats_request* osr;
+	size_t size = sizeof *osr + sizeof(ofp_flow_stats_request);
+	boost::shared_array<char> raw_of(new char[size]);
+	osr = (ofp_stats_request*) raw_of.get();
+	osr->header.length = htons(size);
+	osr->header.type = OFPT_STATS_REQUEST;
+	osr->header.version = OFP_VERSION;
+	osr->type = htons(OFPST_FLOW);
+	osr->flags= 0;
+
+	ofp_flow_stats_request& ofsr =*((ofp_flow_stats_request*) osr->body);
+
+	memset(&ofsr.match, 0, sizeof(ofsr.match));
+	ofsr.match.wildcards = htonl(OFPFW_ALL);
+//	ofsr.out_port = htons(OFPP_NONE);
+	ofsr.out_port = htons(port);
+	ofsr.table_id = 0xff;
+
+
+	/*Send command*/
+	send_openflow_command(src, &osr->header, true);
+	cookie++;
+	return 0;
 }
 
 Disposition fns::handle_datapath_join(const Event& e) {
@@ -173,6 +224,8 @@ void fns::send_pkt_to_all_fns(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 
 void fns::process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 		EPoint> ep_src, const Flow& flow, const Buffer& buff, int buf_id) {
+
+#ifdef NOX_OF10
 	boost::shared_ptr<Buffer> arp;
 	boost::shared_ptr<EPoint> ep_dst;
 	lg.dbg("L3 FNS. Packet in %ld:%d", ep_src->ep_id, ep_src->in_port);
@@ -271,7 +324,7 @@ void fns::process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 		in_port = ports.second;
 
 	}
-
+#endif
 }
 void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 		EPoint> ep_src, const Flow& flow, const Buffer& buff, int buf_id) {
@@ -343,6 +396,7 @@ void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 	path = finder.getPath(ep_dst->ep_id);
 	psize = path.size();
 
+	cookie = fns->getUuid();
 	/*Install specific rules with src and destination L2*/
 	for (int k = 0; k < psize; k++) {
 		int bufid = -1;
@@ -450,10 +504,10 @@ void fns::set_mod_def(struct ofp_flow_mod *ofm, int p_out, int buf) {
 	ofm->header.type = OFPT_FLOW_MOD;
 
 	/*Some more parameters*/
-	ofm->cookie = htonl(cookie);
+	ofm->cookie = htonll(cookie);
 	ofm->command = htons(OFPFC_ADD);
-	ofm->hard_timeout = htons(0);
-	ofm->idle_timeout = htons(HARD_TIMEOUT);
+	ofm->hard_timeout = htons(HARD_TIMEOUT);
+	ofm->idle_timeout = htons(IDLE_TIMEOUT);
 	ofm->priority = htons(OFP_DEFAULT_PRIORITY);
 	ofm->flags = ofd_flow_mod_flags();
 }
@@ -486,7 +540,7 @@ ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
 
 	/*Send command*/
 	send_openflow_command(src, &ofm->header, true);
-	cookie++;
+	//cookie++;
 	return ofm->match;
 }
 
@@ -534,7 +588,7 @@ ofp_match fns::install_rule_vlan_pop(uint64_t id, int p_out,
 
 	/*Send command*/
 	send_openflow_command(src, &ofm->header, true);
-	cookie++;
+	//cookie++;
 	return ofm->match;
 }
 
@@ -575,7 +629,7 @@ ofp_match fns::install_rule_vlan_swap(uint64_t id, int p_out,
 
 	/*Send command*/
 	send_openflow_command(src, &ofm->header, true);
-	cookie++;
+//	cookie++;
 	return ofm->match;
 }
 
@@ -605,7 +659,7 @@ int fns::remove_rule(boost::shared_ptr<FNSRule> rule) {
 	ofm->flags = ofd_flow_mod_flags();
 	/*Send command*/
 	send_openflow_command(src, &ofm->header, true);
-	cookie++;
+//	cookie++;
 	return 0;
 }
 #endif
@@ -1332,8 +1386,12 @@ void fns::install() {
 
 	register_handler("Link_event", boost::bind(&fns::handle_link_event, this,
 			_1));
+	register_handler("Port_status_event", boost::bind(&fns::handle_port_event, this,
+			_1));
 	register_handler("Datapath_join_event", boost::bind(
 			&fns::handle_datapath_join, this, _1));
+	register_handler("Flow_stats_in_event", boost::bind(
+				&fns::handle_flow_stats_in_event, this, _1));
 	register_handler("Datapath_leave_event", boost::bind(
 			&fns::handle_datapath_leave, this, _1));
 	register_handler("Packet_in_event", boost::bind(&fns::handle_packet_in,

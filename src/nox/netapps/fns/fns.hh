@@ -25,6 +25,8 @@
 #include "threads/native.hh"
 #include <boost/bind.hpp>
 #include "discovery/link-event.hh"
+#include "port-status.hh"
+#include "flow-stats-in.hh"
 #include "datapath-join.hh"
 #include "datapath-leave.hh"
 #include "flow.hh"
@@ -57,7 +59,7 @@ using namespace vigil::container;
 class fns: public Component {
 public:
 
-	static const int IDLE_TIMEOUT = 0;
+	static const int IDLE_TIMEOUT = 60;
 	static const int HARD_TIMEOUT = 0;
 	static const int VLAN_NONE = 0xffff;
 
@@ -74,9 +76,13 @@ public:
 
 	/*Event handlers */
 	Disposition handle_link_event(const Event&);
+	Disposition handle_port_event(const Event&);
 	Disposition handle_datapath_join(const Event& e);
 	Disposition handle_datapath_leave(const Event& e);
 	Disposition handle_packet_in(const Event& e);
+	Disposition handle_flow_stats_in_event(const Event& e);
+
+	int send_flow_stats_req(datapathid src, int port);
 
 
 
