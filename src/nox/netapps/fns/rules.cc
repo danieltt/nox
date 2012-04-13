@@ -190,7 +190,6 @@ boost::shared_ptr<EPoint>  RulesDB::getGlobalLocation(vigil::ethernetaddr addr){
 
 	fns = fnsList.begin();
 	while(fns!=fnsList.end()){
-		lg.dbg("fns :%lu", fns->second->getUuid());
 		ep=fns->second->getLocation(addr);
 		if(ep!=boost::shared_ptr<EPoint>())
 			return ep;

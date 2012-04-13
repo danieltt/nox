@@ -28,7 +28,15 @@ pair<int, int> Node::getPortTo(Node* node) {
 	}
 	return pair<int, int> (-1, -1);
 }
-
+Node* Node::getNodeFromPort(int port) {
+	//	printf("Dest %ld\n", node->id);
+	for (int i = 0; i < adjacentNodes.size(); i++) {
+		//		printf("ID: %ld p: %d\n",adjacentNodes.at(i).first->id, adjacentNodes.at(i).second->port);
+		if (adjacentNodes.at(i).second->ports.first == port)
+			return adjacentNodes.at(i).first;
+	}
+	return NULL;
+}
 Node* PathFinder::addNode(uint64_t id, int ports) {
 	pair<map<uint64_t, Node*>::iterator, bool> ret;
 	Node* node = new Node(id, ports);

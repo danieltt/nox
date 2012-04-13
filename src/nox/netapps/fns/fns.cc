@@ -58,13 +58,22 @@ Disposition fns::handle_link_event(const Event& e) {
 }
 
 Disposition fns::handle_port_event(const Event& e) {
-//	const Port_status_event& pe = assert_cast<const Port_status_event&> (e);
+	const Port_status_event& pe = assert_cast<const Port_status_event&> (e);
+	Node* local, *remote;
+	if (pe.port.state) {
+		lg.dbg("port %lu:%d is down. We need to Reroute traffic",
+				pe.datapath_id.as_host(), pe.port.port_no);
+		local = finder.getNode(pe.datapath_id.as_host());
+		if (!local)
+			return CONTINUE;
+		remote = local->getNodeFromPort(pe.port.port_no);
+		if (!remote)
+			return CONTINUE;
+		finder.removeEdge(local,remote);
 
-	//	if(pe.port.state){
-	//		lg.dbg("port %lu:%d is down. We need to Reroute traffic", pe.datapath_id.as_host(),pe.port.port_no);
-	//		send_flow_stats_req(pe.datapath_id, pe.port.port_no);
-	//we should remove the link before computing again
-	//	}
+		send_flow_stats_req(pe.datapath_id, pe.port.port_no);
+		//we should remove the link before computing again
+	}
 	return CONTINUE;
 }
 
@@ -76,7 +85,7 @@ Disposition fns::handle_flow_stats_in_event(const Event& e) {
 	ethernetaddr dl_src;
 	ethernetaddr dl_dst;
 
-	if(fe.xid() != fns::LINK_DOWN)
+	if (fe.xid() != fns::LINK_DOWN)
 		return CONTINUE;
 
 	lg.dbg("flow stats event: %lu. Affected flows: %lu",
@@ -84,7 +93,7 @@ Disposition fns::handle_flow_stats_in_event(const Event& e) {
 	for (i = 0; i < fe.flows.size(); i++) {
 		/* get source and destination and install new rules */
 		dl_dst = ethernetaddr(fe.flows.at(i).match.dl_dst);
-		dl_src =  ethernetaddr(fe.flows.at(i).match.dl_src);
+		dl_src = ethernetaddr(fe.flows.at(i).match.dl_src);
 		ep_dst = rules.getGlobalLocation(dl_dst);
 		ep_src = rules.getGlobalLocation(dl_src);
 		lg.dbg("Destination is in endpoint %lu", ep_dst->ep_id);
@@ -110,7 +119,6 @@ int fns::send_flow_stats_req(datapathid src, int port) {
 	osr->header.xid = LINK_DOWN;
 	osr->type = htons(OFPST_FLOW);
 	osr->flags = 0;
-
 
 	ofp_flow_stats_request& ofsr = *((ofp_flow_stats_request*) osr->body);
 
@@ -402,8 +410,9 @@ void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 	install_path(dl_src, dl_dst, ep_src, ep_dst, buf_id);
 
 }
-void fns::install_path(ethernetaddr dl_src, ethernetaddr dl_dst, boost::shared_ptr<
-		EPoint> ep_src, boost::shared_ptr<EPoint> ep_dst, int buf_id) {
+void fns::install_path(ethernetaddr dl_src, ethernetaddr dl_dst,
+		boost::shared_ptr<EPoint> ep_src, boost::shared_ptr<EPoint> ep_dst,
+		int buf_id) {
 	ofp_match match;
 	vector<Node*> path;
 	int in_port = 0, out_port = 0;

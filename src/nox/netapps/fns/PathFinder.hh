@@ -45,6 +45,7 @@ public:
 		//nodes.push_back(this);
 	}
 	pair<int, int> getPortTo(Node* node);
+	Node* getNodeFromPort(int port);
 
 	uint64_t id;
 	int ports;
