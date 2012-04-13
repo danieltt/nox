@@ -87,6 +87,8 @@ public:
 	void removeFNS(uint64_t uuid);
 	boost::shared_ptr<FNS> getFNS(uint64_t uuid);
 
+	boost::shared_ptr<EPoint> getGlobalLocation(vigil::ethernetaddr addr);
+
 
 private:
 	PathFinder* finder;

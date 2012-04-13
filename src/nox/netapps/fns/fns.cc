@@ -42,40 +42,62 @@ static Vlog_module lg("fns");
 Disposition fns::handle_link_event(const Event& e) {
 	const Link_event& le = assert_cast<const Link_event&> (e);
 	int cost = 1;
-	lg.dbg("Adding link %d: %lu:%u -> %lu:%u", le.action, le.dpsrc.as_host(), le.sport,
-			le.dpdst.as_host(), le.dport);
+	lg.dbg("Adding link %d: %lu:%u -> %lu:%u", le.action, le.dpsrc.as_host(),
+			le.sport, le.dpdst.as_host(), le.dport);
 	if (le.action == le.ADD) {
 		finder.addEdge(le.dpsrc.as_host(), le.dpdst.as_host(), new LinkAtr(
 				cost, le.sport, le.dport),
 				new LinkAtr(cost, le.dport, le.sport));
 	}
 	if (le.action == le.REMOVE) {
+		send_flow_stats_req(le.dpsrc, le.sport);
 		finder.removeEdge(le.dpsrc.as_host(), le.dpdst.as_host());
+
 	}
 	return CONTINUE;
 }
 
 Disposition fns::handle_port_event(const Event& e) {
-	const Port_status_event& pe = assert_cast<const Port_status_event&> (e);
+//	const Port_status_event& pe = assert_cast<const Port_status_event&> (e);
 
-	if(pe.port.state){
-		lg.dbg("port %lu:%d is down. We need to Reroute traffic", pe.datapath_id.as_host(),pe.port.port_no);
-		send_flow_stats_req(pe.datapath_id, pe.port.port_no);
-	}
+	//	if(pe.port.state){
+	//		lg.dbg("port %lu:%d is down. We need to Reroute traffic", pe.datapath_id.as_host(),pe.port.port_no);
+	//		send_flow_stats_req(pe.datapath_id, pe.port.port_no);
+	//we should remove the link before computing again
+	//	}
 	return CONTINUE;
 }
 
 Disposition fns::handle_flow_stats_in_event(const Event& e) {
 	const Flow_stats_in_event& fe = assert_cast<const Flow_stats_in_event&> (e);
+	int i;
+	boost::shared_ptr<EPoint> ep_dst;
+	boost::shared_ptr<EPoint> ep_src;
+	ethernetaddr dl_src;
+	ethernetaddr dl_dst;
 
-	lg.dbg("flow stats event: %lu. Affected flows: %lu", fe.datapath_id.as_host(), fe.flows.size());
+	if(fe.xid() != fns::LINK_DOWN)
+		return CONTINUE;
 
+	lg.dbg("flow stats event: %lu. Affected flows: %lu",
+			fe.datapath_id.as_host(), fe.flows.size());
+	for (i = 0; i < fe.flows.size(); i++) {
+		/* get source and destination and install new rules */
+		dl_dst = ethernetaddr(fe.flows.at(i).match.dl_dst);
+		dl_src =  ethernetaddr(fe.flows.at(i).match.dl_src);
+		ep_dst = rules.getGlobalLocation(dl_dst);
+		ep_src = rules.getGlobalLocation(dl_src);
+		lg.dbg("Destination is in endpoint %lu", ep_dst->ep_id);
+		install_path(dl_src, dl_dst, ep_src, ep_dst, -1);
+
+	}
 
 	return CONTINUE;
 }
 
-int fns::send_flow_stats_req(datapathid src, int port){
-	lg.dbg("Sending flow stats req to : %ld", src.as_host());;
+int fns::send_flow_stats_req(datapathid src, int port) {
+	lg.dbg("Sending flow stats req to : %ld", src.as_host());
+	;
 
 	/*OpenFlow command initialization*/
 	ofp_stats_request* osr;
@@ -85,17 +107,18 @@ int fns::send_flow_stats_req(datapathid src, int port){
 	osr->header.length = htons(size);
 	osr->header.type = OFPT_STATS_REQUEST;
 	osr->header.version = OFP_VERSION;
+	osr->header.xid = LINK_DOWN;
 	osr->type = htons(OFPST_FLOW);
-	osr->flags= 0;
+	osr->flags = 0;
 
-	ofp_flow_stats_request& ofsr =*((ofp_flow_stats_request*) osr->body);
+
+	ofp_flow_stats_request& ofsr = *((ofp_flow_stats_request*) osr->body);
 
 	memset(&ofsr.match, 0, sizeof(ofsr.match));
 	ofsr.match.wildcards = htonl(OFPFW_ALL);
-//	ofsr.out_port = htons(OFPP_NONE);
+	//	ofsr.out_port = htons(OFPP_NONE);
 	ofsr.out_port = htons(port);
 	ofsr.table_id = 0xff;
-
 
 	/*Send command*/
 	send_openflow_command(src, &osr->header, true);
@@ -229,7 +252,7 @@ void fns::process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 	boost::shared_ptr<Buffer> arp;
 	boost::shared_ptr<EPoint> ep_dst;
 	lg.dbg("L3 FNS. Packet in %ld:%d", ep_src->ep_id, ep_src->in_port);
-	vigil::ethernetaddr dl_dst,dl_src;
+	vigil::ethernetaddr dl_dst, dl_src;
 	uint32_t nw_dst = ntohl(flow.nw_dst);
 	fns->addMAC(nw_dst, flow.dl_src);
 	vector<Node*> path;
@@ -277,6 +300,7 @@ void fns::process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 
 	/* We don't know the MAC address of the destination, so we wait for it */
 	/*Get shortest path*/
+
 	path = finder.getPath(ep_dst->ep_id);
 	psize = path.size();
 
@@ -329,10 +353,7 @@ void fns::process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 		EPoint> ep_src, const Flow& flow, const Buffer& buff, int buf_id) {
 	boost::shared_ptr<EPoint> ep_dst;
-	ofp_match match;
-	vector<Node*> path;
-	int in_port = 0, out_port = 0;
-	int psize;
+
 	uint32_t nw_dst, nw_src;
 	//buf_id = -1;
 	pair<int, int> ports;
@@ -378,6 +399,19 @@ void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 		return;
 	}
 
+	install_path(dl_src, dl_dst, ep_src, ep_dst, buf_id);
+
+}
+void fns::install_path(ethernetaddr dl_src, ethernetaddr dl_dst, boost::shared_ptr<
+		EPoint> ep_src, boost::shared_ptr<EPoint> ep_dst, int buf_id) {
+	ofp_match match;
+	vector<Node*> path;
+	int in_port = 0, out_port = 0;
+	int psize;
+	//buf_id = -1;
+	pair<int, int> ports;
+	boost::shared_ptr<Buffer> buff1;// = boost::shared_ptr<Buffer>();
+
 	/* Compute path from source*/
 	/* TODO Caching path is required if the network is big*/
 	if (finder.compute(ep_src->ep_id) < 0) {
@@ -396,7 +430,7 @@ void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 	path = finder.getPath(ep_dst->ep_id);
 	psize = path.size();
 
-	cookie = fns->getUuid();
+	cookie = ep_dst->fns_uuid;
 	/*Install specific rules with src and destination L2*/
 	for (int k = 0; k < psize; k++) {
 		int bufid = -1;
@@ -629,7 +663,7 @@ ofp_match fns::install_rule_vlan_swap(uint64_t id, int p_out,
 
 	/*Send command*/
 	send_openflow_command(src, &ofm->header, true);
-//	cookie++;
+	//	cookie++;
 	return ofm->match;
 }
 
@@ -659,7 +693,7 @@ int fns::remove_rule(boost::shared_ptr<FNSRule> rule) {
 	ofm->flags = ofd_flow_mod_flags();
 	/*Send command*/
 	send_openflow_command(src, &ofm->header, true);
-//	cookie++;
+	//	cookie++;
 	return 0;
 }
 #endif
@@ -1265,7 +1299,8 @@ void fns::read_socks() {
 						remove_fns(&msg->fns);
 						break;
 					case FNS_MSG_SW_IDS: {
-						/*TODO*/
+						/*get up ports that are not links to other switches*/
+						lg.dbg("Getting possible endpoints");
 						break;
 					}
 					default:
@@ -1386,12 +1421,12 @@ void fns::install() {
 
 	register_handler("Link_event", boost::bind(&fns::handle_link_event, this,
 			_1));
-	register_handler("Port_status_event", boost::bind(&fns::handle_port_event, this,
-			_1));
+	register_handler("Port_status_event", boost::bind(&fns::handle_port_event,
+			this, _1));
 	register_handler("Datapath_join_event", boost::bind(
 			&fns::handle_datapath_join, this, _1));
 	register_handler("Flow_stats_in_event", boost::bind(
-				&fns::handle_flow_stats_in_event, this, _1));
+			&fns::handle_flow_stats_in_event, this, _1));
 	register_handler("Datapath_leave_event", boost::bind(
 			&fns::handle_datapath_leave, this, _1));
 	register_handler("Packet_in_event", boost::bind(&fns::handle_packet_in,

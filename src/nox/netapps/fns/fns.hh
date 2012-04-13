@@ -62,6 +62,7 @@ public:
 	static const int IDLE_TIMEOUT = 60;
 	static const int HARD_TIMEOUT = 0;
 	static const int VLAN_NONE = 0xffff;
+	static const int LINK_DOWN = 0xf12af;
 
 	/** \brief Constructor of fns.
 	 *
@@ -149,6 +150,8 @@ private:
 				const Buffer& buff, int buf_id);
 	void process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 					const Buffer& buff, int buf_id);
+	void install_path(ethernetaddr dl_src, ethernetaddr dl_dst, boost::shared_ptr<
+			EPoint> ep_src, boost::shared_ptr<EPoint> ep_dst, int buf_id);
 
 	void set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
 			vigil::ethernetaddr dl_src, uint16_t vlan);

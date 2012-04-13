@@ -17,6 +17,8 @@
  */
 #include "rules.hh"
 #include <boost/functional/hash.hpp>
+#include "vlog.hh"
+static vigil::Vlog_module lg("rules");
 
 FNSRule::FNSRule(uint64_t sw_id, ofp_match match1) :
 	sw_id(sw_id) {
@@ -182,6 +184,21 @@ void RulesDB::removeFNS(uint64_t uuid) {
 
 }
 
+boost::shared_ptr<EPoint>  RulesDB::getGlobalLocation(vigil::ethernetaddr addr){
+	map<uint64_t, boost::shared_ptr<FNS> >::iterator fns;
+	boost::shared_ptr<EPoint> ep;
+
+	fns = fnsList.begin();
+	while(fns!=fnsList.end()){
+		lg.dbg("fns :%lu", fns->second->getUuid());
+		ep=fns->second->getLocation(addr);
+		if(ep!=boost::shared_ptr<EPoint>())
+			return ep;
+		fns++;
+	}
+	return boost::shared_ptr<EPoint>();
+
+}
 /**
  * Locator class
  */
