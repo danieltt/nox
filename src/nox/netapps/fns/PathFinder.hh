@@ -60,6 +60,7 @@ public:
 	}
 	Node* addNode(uint64_t id,int ports);
 	void removeNode(uint64_t id);
+	Node* getNode(uint64_t id);
 	void addEdge(uint64_t node1, uint64_t node2, LinkAtr* atr1, LinkAtr* atr2);
 	void removeEdge(uint64_t node1, uint64_t node2);
 	int compute(uint64_t source);
