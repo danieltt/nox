@@ -51,6 +51,9 @@ void PathFinder::removeNode(uint64_t id) {
 }
 Node* PathFinder::getNode(uint64_t id){
 	map<uint64_t, Node*>::iterator epr;
+	if (nodes.size() == 0) {
+		return NULL;
+	}
 	epr = nodes.find(id);
 	return (nodes.end() == epr) ? NULL : epr->second;
 
@@ -61,10 +64,6 @@ void PathFinder::addEdge(uint64_t node1, uint64_t node2, LinkAtr* atr1,
 	Node* n1;
 	Node* n2;
 	map<uint64_t, Node*>::iterator epr;
-
-	if (nodes.size() == 0) {
-		return;
-	}
 
 	if((n1 = getNode(node1)) == NULL)
 		return;
@@ -83,10 +82,6 @@ void PathFinder::removeEdge(uint64_t node1, uint64_t node2) {
 	vector<pair<Node*, LinkAtr*> > tmp;
 	vector<pair<Node*, LinkAtr*> > tmp1;
 	pair<Node*, LinkAtr*> tmppair;
-
-	if (nodes.size() == 0) {
-		return;
-	}
 
 	epr = nodes.find(node1);
 	if((n1 = getNode(node1)) == NULL)
@@ -110,8 +105,31 @@ void PathFinder::removeEdge(uint64_t node1, uint64_t node2) {
 			tmp1.push_back(tmppair);
 	}
 	n2->adjacentNodes = tmp1;
-
 }
+
+void PathFinder::removeEdge(Node* n1, Node* n2) {
+	map<uint64_t, Node*>::iterator epr;
+	vector<pair<Node*, LinkAtr*> > tmp;
+	vector<pair<Node*, LinkAtr*> > tmp1;
+	pair<Node*, LinkAtr*> tmppair;
+
+	while(!n1->adjacentNodes.empty()){
+		tmppair = n1->adjacentNodes.back();
+		n1->adjacentNodes.pop_back();
+		if(tmppair.first != n2)
+			tmp.push_back(tmppair);
+	}
+	n1->adjacentNodes = tmp;
+
+	while(!n2->adjacentNodes.empty()){
+		tmppair = n2->adjacentNodes.back();
+		n2->adjacentNodes.pop_back();
+		if(tmppair.first != n1)
+			tmp1.push_back(tmppair);
+	}
+	n2->adjacentNodes = tmp1;
+}
+
 int PathFinder::compute(uint64_t source) {
 	clean();
 	nodesTmp = nodes;

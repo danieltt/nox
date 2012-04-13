@@ -63,6 +63,7 @@ public:
 	Node* getNode(uint64_t id);
 	void addEdge(uint64_t node1, uint64_t node2, LinkAtr* atr1, LinkAtr* atr2);
 	void removeEdge(uint64_t node1, uint64_t node2);
+	void removeEdge(Node* n1, Node* n2);
 	int compute(uint64_t source);
 	void clean();
 	void PrintShortestRouteTo(uint64_t destination);
