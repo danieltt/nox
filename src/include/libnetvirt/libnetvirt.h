@@ -32,6 +32,7 @@ extern "C" {
 
 #define LIBNETVIRT_FORWARDING_L2 2
 #define LIBNETVIRT_FORWARDING_L3 3
+#define LIBNETVIRT_FORWARDING_L3VPN 4
 
 #define LIBNETVIRT_CONSTRAINT_MINBW 1
 #define LIBNETVIRT_CONSTRAINT_MAXBW 2
@@ -44,9 +45,8 @@ typedef struct EndPoint {
 	uint16_t port;
 	uint32_t mpls;
 	uint16_t vlan;
-	uint32_t address;
-	uint8_t mask;
-	uint8_t pad[2];
+	char address[MAX_NAME_SIZE];
+//	uint8_t pad[2];
 } endpoint;
 
 typedef struct constraint {
@@ -112,6 +112,8 @@ fnsDesc* parse_fns_Mem(const char *content, int length);
 
 endpoint* add_local_epoint(fnsDesc* fns, int index, uint64_t uuid,
 		uint64_t swId, uint32_t port, uint32_t vlan, uint32_t mpls);
+endpoint* add_local_epoint_l3(fnsDesc* fns, int index, uint64_t uuid,
+		uint64_t swId, uint32_t port, uint32_t vlan, char* net);
 fnsDesc* create_local_fns(uint64_t uuid, int nEp, char* name);
 
 /* FNS GETs */
@@ -125,6 +127,7 @@ uint64_t getSwIdFromEp(endpoint* ep);
 uint16_t getPortFromEp(endpoint* ep);
 uint32_t getMplsFromEp(endpoint* ep);
 uint16_t getVlanFromEp(endpoint* ep);
+char* getAddressFromEp(endpoint* ep);
 
 extern void printFNS(fnsDesc *cur);
 /*Substrate functions*/
