@@ -874,7 +874,7 @@ to_python(const Flow& flow)
     if (!s) {
         throw std::runtime_error("Could not find Flow SWIG type_info");
     }
-    return SWIG_Python_NewPointerObj(f, s, SWIG_POINTER_OWN | 0);
+    return SWIG_Python_NewPointerObj(m, f, s, SWIG_POINTER_OWN | 0);
 
 //     PyObject* dict = PyDict_New();
 //     if (!dict) {

@@ -306,7 +306,7 @@ private:
             throw runtime_error("Could not find PyContext SWIG type_info.");
         }
         
-        PyObject* pyctxt = SWIG_Python_NewPointerObj(p, s, 0);
+        PyObject* pyctxt = SWIG_Python_NewPointerObj(m, p, s, 0);
         assert(pyctxt);
 
         Py_DECREF(m);
