@@ -18,6 +18,8 @@
 
 %module "nox.netapps.authenticator.pyauth"
 
+// Hack to get it to compile -BL
+%include "std_list.i"
 %{
 #include "core_events.hh"
 #include "pyrt/pycontext.hh"

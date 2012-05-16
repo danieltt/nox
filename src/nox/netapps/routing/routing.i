@@ -17,6 +17,8 @@
  */
 %module "nox.netapps.routing.pyrouting"
 
+// Hack to get it to compile -BL
+%include "std_list.i"
 %{
 #include "pyrouting.hh"
 #include "routing.hh"
