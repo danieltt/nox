@@ -136,8 +136,7 @@ vigil::ethernetaddr FNS::getMAC(uint32_t ip) {
 /*RulesDB class*/
 uint64_t RulesDB::addEPoint(endpoint* ep, boost::shared_ptr<FNS> fns) {
 	boost::shared_ptr<EPoint> epoint = boost::shared_ptr<EPoint>(new EPoint(
-			ep->swId, ep->port, ep->vlan, fns->getUuid(), ep->mpls,
-			ep->address, ep->mask));
+			ep->swId, ep->port, ep->vlan, fns->getUuid()));
 	//	printf("Adding %ld\n",ep->id);
 	boost::shared_ptr<EPoint> node = getEpoint(epoint->key);
 	if (node == NULL) {
