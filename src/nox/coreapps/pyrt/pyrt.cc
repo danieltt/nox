@@ -776,7 +776,7 @@ Python_event_manager::create_python_context(const Context* ctxt,
                             pretty_print_python_exception());
     }
 
-    PyObject* pyctxt = SWIG_Python_NewPointerObj(p, s, 0);
+    PyObject* pyctxt = SWIG_Python_NewPointerObj(m, p, s, 0);
     Py_INCREF(pyctxt); // XXX needed?
 
     //Py_DECREF(m);

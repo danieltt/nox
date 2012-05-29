@@ -69,7 +69,7 @@ DeferredCallback::get_instance(const Callback& c)
     DeferredCallback* cb = new DeferredCallback(c);
 
     // flag as used in *_wrap.cc....correct?
-    return SWIG_Python_NewPointerObj(cb, s, SWIG_POINTER_OWN | 0);
+    return SWIG_Python_NewPointerObj(m, cb, s, SWIG_POINTER_OWN | 0);
 }
 
 bool

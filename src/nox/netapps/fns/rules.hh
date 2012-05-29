@@ -28,51 +28,52 @@
 #include <cstdlib>
 
 #include "noxdetect.hh"
+#include "EPoint.hh"
+#include "route.hh"
 
 using namespace std;
-class FNSRule {
+
+
+class Locator {
 public:
-	FNSRule(uint64_t sw_id, ofp_match match);
-	uint64_t sw_id;
-	ofp_match match;
-};
-
-
-
-class EPoint {
-public:
-	EPoint(uint64_t ep_id, uint32_t in_port, uint16_t vlan, uint64_t fns_uuid);
-	EPoint(uint64_t ep_id, uint32_t in_port, uint16_t vlan, uint64_t fns_uuid, uint32_t mpls);
-	void addRule(boost::shared_ptr<FNSRule> r);
-	int num_installed();
-	boost::shared_ptr<FNSRule> getRuleBack();
-	void installed_pop();
-	static uint64_t generate_key(uint64_t sw_id, uint32_t port, uint16_t vlan, uint32_t mpls);
-
-	uint64_t key;
-	uint64_t ep_id;
-	int in_port;
-	uint16_t vlan;
-	uint64_t fns_uuid;
-	uint32_t mpls;
-
+	bool insertClient(vigil::ethernetaddr addr, boost::shared_ptr<EPoint> ep);
+	boost::shared_ptr<EPoint> getLocation(vigil::ethernetaddr addr);
+	void printLocations();
 private:
-	vector<boost::shared_ptr<FNSRule> > installed_rules;
+	map<vigil::ethernetaddr, boost::shared_ptr<EPoint> > clients;
+	bool validateAddr(vigil::ethernetaddr addr);
+
 };
 
 class FNS{
 public:
-	FNS(uint64_t uuid);
+	FNS(uint64_t uuid, uint8_t forwarding);
 	uint64_t getUuid();
+	uint8_t getForwarding();
 	int numEPoints();
 	void addEPoint(boost::shared_ptr<EPoint> ep);
 	int removeEPoint(boost::shared_ptr<EPoint> ep);
 	boost::shared_ptr<EPoint> getEPoint(int pos);
+	/* L3 lookup*/
+	boost::shared_ptr<EPoint> lookup(uint32_t addr);
+	/* L2 lookup*/
+	bool addlocation(vigil::ethernetaddr addr, boost::shared_ptr<EPoint> ep);
+	boost::shared_ptr<EPoint> getLocation(vigil::ethernetaddr addr);
+
+	/*ARP table lookup */
+	bool addMAC(uint32_t ip, vigil::ethernetaddr mac);
+	vigil::ethernetaddr getMAC(uint32_t ip);
 
 private:
 	uint64_t uuid;
+	uint8_t forwarding;
 	vector<boost::shared_ptr<EPoint> > epoints;
+	RouteTable table;
+	Locator l2table;
+	map<uint32_t, vigil::ethernetaddr > mactable;
+
 };
+
 
 
 class RulesDB {
@@ -86,6 +87,8 @@ public:
 	void removeFNS(uint64_t uuid);
 	boost::shared_ptr<FNS> getFNS(uint64_t uuid);
 
+	boost::shared_ptr<EPoint> getGlobalLocation(vigil::ethernetaddr addr);
+
 
 private:
 	PathFinder* finder;
@@ -95,15 +98,6 @@ private:
 	map<uint64_t, boost::shared_ptr<FNS> > fnsList;
 };
 
-class Locator {
-public:
-	bool insertClient(vigil::ethernetaddr addr, boost::shared_ptr<EPoint> ep);
-	boost::shared_ptr<EPoint> getLocation(vigil::ethernetaddr);
-	void printLocations();
-private:
-	map<vigil::ethernetaddr, boost::shared_ptr<EPoint> > clients;
-	bool validateAddr(vigil::ethernetaddr addr);
 
-};
 
 #endif /* RULES_HH_ */

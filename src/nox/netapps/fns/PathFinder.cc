@@ -28,7 +28,15 @@ pair<int, int> Node::getPortTo(Node* node) {
 	}
 	return pair<int, int> (-1, -1);
 }
-
+Node* Node::getNodeFromPort(int port) {
+	//	printf("Dest %ld\n", node->id);
+	for (int i = 0; i < adjacentNodes.size(); i++) {
+		//		printf("ID: %ld p: %d\n",adjacentNodes.at(i).first->id, adjacentNodes.at(i).second->port);
+		if (adjacentNodes.at(i).second->ports.first == port)
+			return adjacentNodes.at(i).first;
+	}
+	return NULL;
+}
 Node* PathFinder::addNode(uint64_t id, int ports) {
 	pair<map<uint64_t, Node*>::iterator, bool> ret;
 	Node* node = new Node(id, ports);
@@ -49,6 +57,15 @@ vector<Node*> PathFinder::getNodes() {
 void PathFinder::removeNode(uint64_t id) {
 	nodes.erase(id);
 }
+Node* PathFinder::getNode(uint64_t id){
+	map<uint64_t, Node*>::iterator epr;
+	if (nodes.size() == 0) {
+		return NULL;
+	}
+	epr = nodes.find(id);
+	return (nodes.end() == epr) ? NULL : epr->second;
+
+}
 
 void PathFinder::addEdge(uint64_t node1, uint64_t node2, LinkAtr* atr1,
 		LinkAtr* atr2) {
@@ -56,29 +73,71 @@ void PathFinder::addEdge(uint64_t node1, uint64_t node2, LinkAtr* atr1,
 	Node* n2;
 	map<uint64_t, Node*>::iterator epr;
 
-	if (nodes.size() == 0) {
+	if((n1 = getNode(node1)) == NULL)
 		return;
-	}
 
-	epr = nodes.find(node1);
-	if (nodes.end() == epr)
+	if((n2 = getNode(node2)) == NULL)
 		return;
-	else
-		n1 = epr->second;
-
-	epr = nodes.find(node2);
-	if (nodes.end() == epr)
-		return;
-	else
-		n2 = epr->second;
 
 	n1->adjacentNodes.push_back(pair<Node*, LinkAtr*> (n2, atr1));
 	n2->adjacentNodes.push_back(pair<Node*, LinkAtr*> (n1, atr2));
 }
 
 void PathFinder::removeEdge(uint64_t node1, uint64_t node2) {
+	Node* n1;
+	Node* n2;
+	map<uint64_t, Node*>::iterator epr;
+	vector<pair<Node*, LinkAtr*> > tmp;
+	vector<pair<Node*, LinkAtr*> > tmp1;
+	pair<Node*, LinkAtr*> tmppair;
 
+	epr = nodes.find(node1);
+	if((n1 = getNode(node1)) == NULL)
+			return;
+
+	if((n2 = getNode(node2)) == NULL)
+			return;
+
+	while(!n1->adjacentNodes.empty()){
+		tmppair = n1->adjacentNodes.back();
+		n1->adjacentNodes.pop_back();
+		if(tmppair.first != n2)
+			tmp.push_back(tmppair);
+	}
+	n1->adjacentNodes = tmp;
+
+	while(!n2->adjacentNodes.empty()){
+		tmppair = n2->adjacentNodes.back();
+		n2->adjacentNodes.pop_back();
+		if(tmppair.first != n1)
+			tmp1.push_back(tmppair);
+	}
+	n2->adjacentNodes = tmp1;
 }
+
+void PathFinder::removeEdge(Node* n1, Node* n2) {
+	map<uint64_t, Node*>::iterator epr;
+	vector<pair<Node*, LinkAtr*> > tmp;
+	vector<pair<Node*, LinkAtr*> > tmp1;
+	pair<Node*, LinkAtr*> tmppair;
+
+	while(!n1->adjacentNodes.empty()){
+		tmppair = n1->adjacentNodes.back();
+		n1->adjacentNodes.pop_back();
+		if(tmppair.first != n2)
+			tmp.push_back(tmppair);
+	}
+	n1->adjacentNodes = tmp;
+
+	while(!n2->adjacentNodes.empty()){
+		tmppair = n2->adjacentNodes.back();
+		n2->adjacentNodes.pop_back();
+		if(tmppair.first != n1)
+			tmp1.push_back(tmppair);
+	}
+	n2->adjacentNodes = tmp1;
+}
+
 int PathFinder::compute(uint64_t source) {
 	clean();
 	nodesTmp = nodes;
@@ -224,10 +283,6 @@ int main(int argc, char* argv[]) {
 	finder.addEdge(3, 4, atr, atr);
 	finder.addEdge(4, 1, atr, atr);
 
-	/*finder.addEdge(new Edge(b, a, 1));
-	 finder.addEdge(new Edge(c, b, 1));
-	 finder.addEdge(new Edge(d, c, 1));
-	 finder.addEdge(new Edge(d, a, 1));/*/
 
 	printf("Computing\n");
 	finder.compute(1);

@@ -299,10 +299,10 @@ class discovery(Component):
     
         if linktuple not in self.adjacency_list:
             self.add_link(linktuple)
-          #  lg.warn('new link detected ('+longlong_to_octstr(linktuple[0])+' p:'\
-          #             +str(linktuple[1]) +' -> '+\
-          #            longlong_to_octstr(linktuple[2])+\
-          #             ' p:'+str(linktuple[3])+')')
+            lg.warn('new link detected ('+longlong_to_octstr(linktuple[0])+' p:'\
+                       +str(linktuple[1]) +' -> '+\
+                      longlong_to_octstr(linktuple[2])+\
+                       ' p:'+str(linktuple[3])+')')
     
     
         # add to adjaceny list or update timestamp

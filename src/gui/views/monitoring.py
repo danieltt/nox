@@ -124,49 +124,51 @@ class Monitoring_View(View):
             self.infoDisplay.append(msg)
             for item in reply[0]:
                 msg = "\nMatch : \n"
-                #for key in item['match']:
-                #    msg += key + "=" + str(item['match'][key]) + " "
+                for key in item['match']:
+                    msg += key + "=" + str(item['match'][key]) + " "
                 # too many checks, optimize performance... Maybe do the above
                 # for every item except MAC/IPs, and treat those separately
-                match = item['match']
-                msg += "in_port: "+str(match['in_port'])+"  "
-                if "dl_src" in match:
-                    msg += "dl_src: "+hex(match['dl_src'])+"  "
-                if "dl_dst" in match:
-                    msg += "dl_dst: "+hex(match['dl_dst'])+"  "
-                if "nw_src" in match:
-                    msg += "nw_src: "+self.intToDottedIP(int(match['nw_src']))+"  "
-                if "nw_dst" in match:
-                    msg += "nw_dst: "+self.intToDottedIP(int(match['nw_dst']))+"  "
-                if "tp_src" in match:
-                    msg += "tp_src: "+str(match['tp_src'])+"  "
-                if "tp_dst" in match:
-                    msg += "tp_dst: "+str(match['tp_dst'])+"  "
-                if "nw_dst_n_wild" in match:
-                    msg += "nw_dst_n_wild: "+str(match['nw_dst_n_wild'])+"  "
-                if "nw_proto" in match:
-                    if match['dl_type'] == 0x806:
-                        if match['nw_proto'] == 0x1:
-                            msg += "nw_proto: (overwritten)ARP-Request  "
-                        elif match['nw_proto'] == 0x2:
-                            msg += "nw_proto: (overwritten)ARP-Reply  "
-                    elif match['nw_proto'] == 0x1:
-                        msg += "nw_proto: ICMP  "
-                    else:
-                        msg += "nw_proto: "+str(match['nw_proto'])+"  "
-                if "dl_type" in match:
-                    if match['dl_type'] == 0x800:
-                        msg += "dl_type: IP  "
-                    elif match['dl_type'] == 0x806:
-                        msg += "dl_type: ARP  "
-                    else:
-                        msg += "dl_type: "+hex(match['dl_type'])+"  "
-                if "dl_vlan" in match:
-                    msg += "dl_vlan: "+str(match['dl_vlan'])+"  "
-                if "dl_vlan_pcp" in match:
-                    msg += "dl_vlan_pcp: "+str(match['dl_vlan_pcp'])+"  "
-                if "nw_tos" in match:
-                    msg += "nw_tos: "+str(match['nw_tos'])+"  "
+                #===============================================================
+                # match = item['match']
+                # msg += "in_port: "+str(match['in_port'])+"  "
+                # if "dl_src" in match:
+                #    msg += "dl_src: "+hex(match['dl_src'])+"  "
+                # if "dl_dst" in match:
+                #    msg += "dl_dst: "+hex(match['dl_dst'])+"  "
+                # if "nw_src" in match:
+                #    msg += "nw_src: "+self.intToDottedIP(int(match['nw_src']))+"  "
+                # if "nw_dst" in match:
+                #    msg += "nw_dst: "+self.intToDottedIP(int(match['nw_dst']))+"  "
+                # if "tp_src" in match:
+                #    msg += "tp_src: "+str(match['tp_src'])+"  "
+                # if "tp_dst" in match:
+                #    msg += "tp_dst: "+str(match['tp_dst'])+"  "
+                # if "nw_dst_n_wild" in match:
+                #    msg += "nw_dst_n_wild: "+str(match['nw_dst_n_wild'])+"  "
+                # if "nw_proto" in match:
+                #    if match['dl_type'] == 0x806:
+                #        if match['nw_proto'] == 0x1:
+                #            msg += "nw_proto: (overwritten)ARP-Request  "
+                #        elif match['nw_proto'] == 0x2:
+                #            msg += "nw_proto: (overwritten)ARP-Reply  "
+                #    elif match['nw_proto'] == 0x1:
+                #        msg += "nw_proto: ICMP  "
+                #    else:
+                #        msg += "nw_proto: "+str(match['nw_proto'])+"  "
+                # if "dl_type" in match:
+                #    if match['dl_type'] == 0x800:
+                #        msg += "dl_type: IP  "
+                #    elif match['dl_type'] == 0x806:
+                #        msg += "dl_type: ARP  "
+                #    else:
+                #        msg += "dl_type: "+hex(match['dl_type'])+"  "
+                # if "dl_vlan" in match:
+                #    msg += "dl_vlan: "+str(match['dl_vlan'])+"  "
+                # if "dl_vlan_pcp" in match:
+                #    msg += "dl_vlan_pcp: "+str(match['dl_vlan_pcp'])+"  "
+                # if "nw_tos" in match:
+                #    msg += "nw_tos: "+str(match['nw_tos'])+"  "
+                #===============================================================
                 
                 msg += "\nCounters : \n" + \
                 "Packet count: " + str(item['packet_count']) + "  " + \
@@ -179,9 +181,9 @@ class Monitoring_View(View):
                 "Cookie: " + str(item['cookie']) + "  " + \
                 "Table id: " + str(item['table_id'])
                 msg += "\nActions : \n"
-                for action in item['actions']:
-                    msg += "Port: "+str(action['port'])
-                """NEED TO ADD PARSING FOR OTHER ACTION_TYPES TOO"""
+                #for action in item['actions']:
+                #    msg += "Port: "+str(action['port'])
+                #"""NEED TO ADD PARSING FOR OTHER ACTION_TYPES TOO"""
                 #action_types = enumerate["output","setvlan",etc...]
                 # msg += "Type: "+types[action['type']]) etc
                 self.infoDisplay.append(msg)

@@ -18,6 +18,8 @@
 
 %module "nox.netapps.topology"
 
+// Hack to get it to compile -BL
+%include "std_list.i"
 %{
 #include "pytopology.hh"
 #include "pyrt/pycontext.hh"

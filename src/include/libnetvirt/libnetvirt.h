@@ -28,6 +28,14 @@ extern "C" {
 
 #define DRIVER_OF_NOX 1
 #define DRIVER_MPLS 2
+#define DRIVER_DUMMY 3
+
+#define LIBNETVIRT_FORWARDING_L2 2
+#define LIBNETVIRT_FORWARDING_L3 3
+#define LIBNETVIRT_FORWARDING_L3VPN 4
+
+#define LIBNETVIRT_CONSTRAINT_MINBW 1
+#define LIBNETVIRT_CONSTRAINT_MAXBW 2
 
 #define MAX_NAME_SIZE 20
 
@@ -37,14 +45,15 @@ typedef struct EndPoint {
 	uint16_t port;
 	uint32_t mpls;
 	uint16_t vlan;
-	uint8_t pad[8];
+	char address[MAX_NAME_SIZE];
+//	uint8_t pad[2];
 } endpoint;
 
 typedef struct constraint {
+	uint8_t type;
 	uint64_t src;
 	uint64_t dst;
-	uint32_t minBW;
-	uint32_t maxBW;
+	uint32_t value;
 } constraint;
 
 typedef struct fns_desc {
@@ -57,7 +66,9 @@ typedef struct fns_desc {
 } fnsDesc;
 
 #define GET_ENDPOINT(fns, i) (endpoint *) (&fns->data[i*sizeof(endpoint)])
+#define GET_CONSTRAINT(fns, i) (constraint *) (&fns->data[fns->nEp * sizeof(endpoint) + i * sizeof(constraint)])
 #define GET_FNS_SIZE(nEp, nCons) (sizeof(fnsDesc) + sizeof(endpoint) * nEp + sizeof(constraint) * nCons)
+#define GET_VN_SIZE(vn) (sizeof(fnsDesc) + sizeof(endpoint) * vn->nEp + sizeof(constraint) * vn->nCons)
 
 /*Operations*/
 struct libnetvirt_ops {
@@ -101,7 +112,23 @@ fnsDesc* parse_fns_Mem(const char *content, int length);
 
 endpoint* add_local_epoint(fnsDesc* fns, int index, uint64_t uuid,
 		uint64_t swId, uint32_t port, uint32_t vlan, uint32_t mpls);
-fnsDesc* create_local_fns(uint64_t uuid, int nEp, char* name);
+endpoint* add_local_epoint_l3(fnsDesc* fns, int index, uint64_t uuid,
+		uint64_t swId, uint32_t port, uint32_t vlan, char* net);
+fnsDesc* create_local_fns(uint64_t uuid, int nEp, char* name, uint8_t type);
+
+/* FNS GETs */
+uint16_t getNepFromFNS(fnsDesc* fns);
+uint64_t getUuidFromFNS(fnsDesc* fns);
+
+/* Endpoint GETs*/
+endpoint* getEndpoint(fnsDesc *fns, int pos);
+uint64_t getUuidFromEp(endpoint* ep);
+uint64_t getSwIdFromEp(endpoint* ep);
+uint16_t getPortFromEp(endpoint* ep);
+uint32_t getMplsFromEp(endpoint* ep);
+uint16_t getVlanFromEp(endpoint* ep);
+char* getAddressFromEp(endpoint* ep);
+
 extern void printFNS(fnsDesc *cur);
 /*Substrate functions*/
 //int define_phy_topology(struct libnetvirt_info*, const char* xml);

@@ -25,6 +25,8 @@
 #include "threads/native.hh"
 #include <boost/bind.hpp>
 #include "discovery/link-event.hh"
+#include "port-status.hh"
+#include "flow-stats-in.hh"
 #include "datapath-join.hh"
 #include "datapath-leave.hh"
 #include "flow.hh"
@@ -33,6 +35,7 @@
 #include "openflow-default.hh"
 
 #include "rules.hh"
+#include "EPoint.hh"
 #include "libnetvirt/fns.h"
 #include "PathFinder.hh"
 
@@ -56,9 +59,10 @@ using namespace vigil::container;
 class fns: public Component {
 public:
 
-	static const int IDLE_TIMEOUT = 0;
+	static const int IDLE_TIMEOUT = 60;
 	static const int HARD_TIMEOUT = 0;
 	static const int VLAN_NONE = 0xffff;
+	static const int LINK_DOWN = 0xf12af;
 
 	/** \brief Constructor of fns.
 	 *
@@ -73,14 +77,15 @@ public:
 
 	/*Event handlers */
 	Disposition handle_link_event(const Event&);
+	Disposition handle_port_event(const Event&);
 	Disposition handle_datapath_join(const Event& e);
 	Disposition handle_datapath_leave(const Event& e);
 	Disposition handle_packet_in(const Event& e);
+	Disposition handle_flow_stats_in_event(const Event& e);
 
-	void server();
+	int send_flow_stats_req(datapathid src, int port);
 
-	void process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
-			const Buffer& buff, int buf_id);
+
 
 	int remove_rule(boost::shared_ptr<FNSRule> rule);
 
@@ -122,8 +127,31 @@ private:
 	int server_port;
 	PathFinder finder;
 	RulesDB rules;
-	Locator locator;
+
+	//Locator locator;
 	uint64_t cookie;
+
+	int sock; /* The socket file descriptor for our "listening"
+	 socket */
+	int connectlist[MAX_CONNECTIONS]; /* Array of connected sockets so we know who
+	 we are talking to */
+	fd_set socks; /* Socket file descriptors we want to wake
+	 up for, using select() */
+	int highsock; /* Highest #'d file descriptor, needed for select() */
+
+	//void setnonblocking(int sock);
+	void build_select_list();
+	void handle_new_connection();
+	void read_socks();
+	void server();
+
+
+	void process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src, const Flow& flow,
+				const Buffer& buff, int buf_id);
+	void process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src, const Flow& flow,
+					const Buffer& buff, int buf_id);
+	void install_path(ethernetaddr dl_src, ethernetaddr dl_dst, boost::shared_ptr<
+			EPoint> ep_src, boost::shared_ptr<EPoint> ep_dst, int buf_id);
 
 	void set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
 			vigil::ethernetaddr dl_src, uint16_t vlan);

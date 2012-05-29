@@ -21,6 +21,9 @@
 #include <cstdlib>
 #include "fns.hh"
 #include "libnetvirt/fns.h"
+#include <ctype.h>
+#include <sys/time.h>
+#include <fcntl.h>
 
 #include "packets.h"
 #include "packet_util.hh"
@@ -39,14 +42,96 @@ static Vlog_module lg("fns");
 Disposition fns::handle_link_event(const Event& e) {
 	const Link_event& le = assert_cast<const Link_event&> (e);
 	int cost = 1;
-	lg.dbg("Adding link: %lu:%u -> %lu:%u", le.dpsrc.as_host(), le.sport,
-			le.dpdst.as_host(), le.dport);
+	lg.dbg("Adding link %d: %lu:%u -> %lu:%u", le.action, le.dpsrc.as_host(),
+			le.sport, le.dpdst.as_host(), le.dport);
 	if (le.action == le.ADD) {
 		finder.addEdge(le.dpsrc.as_host(), le.dpdst.as_host(), new LinkAtr(
 				cost, le.sport, le.dport),
 				new LinkAtr(cost, le.dport, le.sport));
 	}
+	if (le.action == le.REMOVE) {
+		send_flow_stats_req(le.dpsrc, le.sport);
+		finder.removeEdge(le.dpsrc.as_host(), le.dpdst.as_host());
+
+	}
 	return CONTINUE;
+}
+
+Disposition fns::handle_port_event(const Event& e) {
+	const Port_status_event& pe = assert_cast<const Port_status_event&> (e);
+	Node* local, *remote;
+	if (pe.port.state) {
+		lg.dbg("port %lu:%d is down. We need to Reroute traffic",
+				pe.datapath_id.as_host(), pe.port.port_no);
+		local = finder.getNode(pe.datapath_id.as_host());
+		if (!local)
+			return CONTINUE;
+		remote = local->getNodeFromPort(pe.port.port_no);
+		if (!remote)
+			return CONTINUE;
+		finder.removeEdge(local,remote);
+
+		send_flow_stats_req(pe.datapath_id, pe.port.port_no);
+		//we should remove the link before computing again
+	}
+	return CONTINUE;
+}
+
+Disposition fns::handle_flow_stats_in_event(const Event& e) {
+	const Flow_stats_in_event& fe = assert_cast<const Flow_stats_in_event&> (e);
+	int i;
+	boost::shared_ptr<EPoint> ep_dst;
+	boost::shared_ptr<EPoint> ep_src;
+	ethernetaddr dl_src;
+	ethernetaddr dl_dst;
+
+	if (fe.xid() != fns::LINK_DOWN)
+		return CONTINUE;
+
+	lg.dbg("flow stats event: %lu. Affected flows: %lu",
+			fe.datapath_id.as_host(), fe.flows.size());
+	for (i = 0; i < fe.flows.size(); i++) {
+		/* get source and destination and install new rules */
+		dl_dst = ethernetaddr(fe.flows.at(i).match.dl_dst);
+		dl_src = ethernetaddr(fe.flows.at(i).match.dl_src);
+		ep_dst = rules.getGlobalLocation(dl_dst);
+		ep_src = rules.getGlobalLocation(dl_src);
+		lg.dbg("Destination is in endpoint %lu", ep_dst->ep_id);
+		install_path(dl_src, dl_dst, ep_src, ep_dst, -1);
+
+	}
+
+	return CONTINUE;
+}
+
+int fns::send_flow_stats_req(datapathid src, int port) {
+	lg.dbg("Sending flow stats req to : %ld", src.as_host());
+	;
+
+	/*OpenFlow command initialization*/
+	ofp_stats_request* osr;
+	size_t size = sizeof *osr + sizeof(ofp_flow_stats_request);
+	boost::shared_array<char> raw_of(new char[size]);
+	osr = (ofp_stats_request*) raw_of.get();
+	osr->header.length = htons(size);
+	osr->header.type = OFPT_STATS_REQUEST;
+	osr->header.version = OFP_VERSION;
+	osr->header.xid = LINK_DOWN;
+	osr->type = htons(OFPST_FLOW);
+	osr->flags = 0;
+
+	ofp_flow_stats_request& ofsr = *((ofp_flow_stats_request*) osr->body);
+
+	memset(&ofsr.match, 0, sizeof(ofsr.match));
+	ofsr.match.wildcards = htonl(OFPFW_ALL);
+	//	ofsr.out_port = htons(OFPP_NONE);
+	ofsr.out_port = htons(port);
+	ofsr.table_id = 0xff;
+
+	/*Send command*/
+	send_openflow_command(src, &osr->header, true);
+	cookie++;
+	return 0;
 }
 
 Disposition fns::handle_datapath_join(const Event& e) {
@@ -115,16 +200,27 @@ Disposition fns::handle_packet_in(const Event& e) {
 				mpls, key);
 		/*DROP packet*/
 	} else {
-		if (locator.insertClient(dl_src, ep))
-			locator.printLocations();
-		/*TODO fix buffer id -1*/
-		process_packet_in(ep, flow, b, buf_id);
+		boost::shared_ptr<FNS> fns = rules.getFNS(ep->fns_uuid);
+		switch (fns->getForwarding()) {
+		case LIBNETVIRT_FORWARDING_L2:
+			fns->addlocation(dl_src, ep);
+
+			process_packet_in_l2(fns, ep, flow, b, buf_id);
+			break;
+		case LIBNETVIRT_FORWARDING_L3:
+			process_packet_in_l3(fns, ep, flow, b, buf_id);
+			break;
+		default:
+			break;
+		}
+
 	}
 
 	return CONTINUE;
 }
 
-void fns::send_pkt_to_all_fns(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src,const Buffer& buff) {
+void fns::send_pkt_to_all_fns(boost::shared_ptr<FNS> fns, boost::shared_ptr<
+		EPoint> ep_src, const Buffer& buff) {
 	boost::shared_ptr<Buffer> buff1;// = boost::shared_ptr<Buffer>();
 	for (int j = 0; j < fns->numEPoints(); j++) {
 		boost::shared_ptr<EPoint> ep = fns->getEPoint(j);
@@ -157,17 +253,118 @@ void fns::send_pkt_to_all_fns(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoi
 	}
 }
 
-void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
-		const Buffer& buff, int buf_id) {
+void fns::process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<
+		EPoint> ep_src, const Flow& flow, const Buffer& buff, int buf_id) {
+
+#ifdef NOX_OF10
+	boost::shared_ptr<Buffer> arp;
 	boost::shared_ptr<EPoint> ep_dst;
-	ofp_match match;
+	lg.dbg("L3 FNS. Packet in %ld:%d", ep_src->ep_id, ep_src->in_port);
+	vigil::ethernetaddr dl_dst, dl_src;
+	uint32_t nw_dst = ntohl(flow.nw_dst);
+	fns->addMAC(nw_dst, flow.dl_src);
 	vector<Node*> path;
 	int in_port = 0, out_port = 0;
 	int psize;
+	pair<int, int> ports;
+	ofp_match match;
+
+	/* Capture ARP to gateway and reply */
+	uint8_t mac[] = { 0x00, 0xAA, 0x05, 0x00, 0x00, 0x10 };
+
+	if (flow.dl_type == ethernet::ARP && nw_dst == ep_src->address) {
+		if (flow.nw_dst == ep_src->address) {
+			lg.dbg("We have an ARP to Gateway. Replying");
+			arp = PacketUtil::pkt_arp_reply(ep_src->address, flow.nw_src, mac,
+					(uint8_t*) flow.dl_src.octet);
+			forward_via_controller(ep_src->ep_id, arp, ep_src->in_port);
+		} else {
+			lg.dbg("The ARP is not for the gateway. We drop it");
+		}
+		return;
+	}
+
+	ep_dst = fns->lookup(nw_dst);
+	if (ep_dst == NULL) {
+		lg.dbg("Destination network not found");
+		return;
+	}
+
+	lg.dbg("Destination is in %ld:%d", ep_dst->ep_id, ep_dst->in_port);
+	/* Send ARP request and store destination */
+	arp = PacketUtil::pkt_arp_request(ep_dst->address, flow.nw_dst, mac);
+	forward_via_controller(ep_dst->ep_id, arp, ep_dst->in_port);
+
+	/* Compute path */
+	if (finder.compute(ep_src->ep_id) < 0) {
+		printf("error computing path\n");
+		return;
+	}
+	dl_dst = fns->getMAC(nw_dst);
+
+	lg.dbg("Destination for %u is %d-%d-%d-%d-%d-%d", nw_dst, dl_dst.octet[0],
+			dl_dst.octet[1], dl_dst.octet[2], dl_dst.octet[3], dl_dst.octet[4],
+			dl_dst.octet[5]);
+
+	/* We don't know the MAC address of the destination, so we wait for it */
+	/*Get shortest path*/
+
+	path = finder.getPath(ep_dst->ep_id);
+	psize = path.size();
+
+	/*Install specific rules with src and destination L2*/
+	for (int k = 0; k < psize; k++) {
+		int bufid = -1;
+		if (psize == 1) {
+			/*Endpoint in the same node*/
+			ports = pair<int, int> (ep_dst->in_port, ep_src->in_port);
+		} else if (k < psize - 1) {
+			ports = path.at(k)->getPortTo(path.at(k + 1));
+			lg.dbg("in %d out: %d", ports.first, ports.second);
+		}
+		out_port = ports.first;
+
+		if (k == 0) {
+			in_port = ep_dst->in_port;
+		}
+
+		if (k == path.size() - 1) {
+			out_port = ep_src->in_port;
+		}
+
+		match = install_rule(path.at(k)->id, out_port, dl_src, dl_dst, bufid,
+				ep_src->vlan, 0);
+
+		/* Keeping track of the installed rules */
+		boost::shared_ptr<FNSRule> rule = boost::shared_ptr<FNSRule>(
+				new FNSRule(path.at(k)->id, match));
+		ep_src->addRule(rule);
+		ep_dst->addRule(rule);
+
+		if (k == path.size() - 1) {
+			bufid = buf_id;
+			lg.dbg("Setting buff id to %d", bufid);
+		}
+		match = install_rule(path.at(k)->id, in_port, dl_dst, dl_src, bufid,
+				ep_dst->vlan, 0);
+
+		/* Keeping track of the installed rules */
+		rule = boost::shared_ptr<FNSRule>(new FNSRule(path.at(k)->id, match));
+		ep_src->addRule(rule);
+		ep_dst->addRule(rule);
+
+		in_port = ports.second;
+
+	}
+#endif
+}
+void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
+		EPoint> ep_src, const Flow& flow, const Buffer& buff, int buf_id) {
+	boost::shared_ptr<EPoint> ep_dst;
+
 	uint32_t nw_dst, nw_src;
 	//buf_id = -1;
 	pair<int, int> ports;
-	boost::shared_ptr<FNS> fns = rules.getFNS(ep_src->fns_uuid);
 	boost::shared_ptr<Buffer> buff1;// = boost::shared_ptr<Buffer>();
 
 	lg.dbg(
@@ -197,21 +394,35 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 	}
 
 	/*Get location of destination*/
-	ep_dst = locator.getLocation(dl_dst);
+	ep_dst = fns->getLocation(dl_dst);
 	if (ep_dst == NULL) {
-		lg.warn("NO destination for this packet in the LOCATOR: %s",
+		lg.dbg("NO destination for this packet in the LOCATOR: %s",
 				dl_dst.string().c_str());
-		locator.printLocations();
 		/* Send ARP request */
 		lg.dbg("creating ARP request");
 		buff1 = PacketUtil::pkt_arp_request(nw_src, nw_dst, dl_src.octet);
 		send_pkt_to_all_fns(fns, ep_src, *buff1.get());
+		send_pkt_to_all_fns(fns, ep_src, buff);
 
 		return;
 	}
 
+	install_path(dl_src, dl_dst, ep_src, ep_dst, buf_id);
+
+}
+void fns::install_path(ethernetaddr dl_src, ethernetaddr dl_dst,
+		boost::shared_ptr<EPoint> ep_src, boost::shared_ptr<EPoint> ep_dst,
+		int buf_id) {
+	ofp_match match;
+	vector<Node*> path;
+	int in_port = 0, out_port = 0;
+	int psize;
+	//buf_id = -1;
+	pair<int, int> ports;
+	boost::shared_ptr<Buffer> buff1;// = boost::shared_ptr<Buffer>();
+
 	/* Compute path from source*/
-	/* TODO Caching is required if the network is big*/
+	/* TODO Caching path is required if the network is big*/
 	if (finder.compute(ep_src->ep_id) < 0) {
 		printf("error computing path\n");
 		return;
@@ -228,6 +439,7 @@ void fns::process_packet_in(boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 	path = finder.getPath(ep_dst->ep_id);
 	psize = path.size();
 
+	cookie = ep_dst->fns_uuid;
 	/*Install specific rules with src and destination L2*/
 	for (int k = 0; k < psize; k++) {
 		int bufid = -1;
@@ -335,10 +547,10 @@ void fns::set_mod_def(struct ofp_flow_mod *ofm, int p_out, int buf) {
 	ofm->header.type = OFPT_FLOW_MOD;
 
 	/*Some more parameters*/
-	ofm->cookie = htonl(cookie);
+	ofm->cookie = htonll(cookie);
 	ofm->command = htons(OFPFC_ADD);
-	ofm->hard_timeout = htons(0);
-	ofm->idle_timeout = htons(HARD_TIMEOUT);
+	ofm->hard_timeout = htons(HARD_TIMEOUT);
+	ofm->idle_timeout = htons(IDLE_TIMEOUT);
 	ofm->priority = htons(OFP_DEFAULT_PRIORITY);
 	ofm->flags = ofd_flow_mod_flags();
 }
@@ -346,7 +558,7 @@ void fns::set_mod_def(struct ofp_flow_mod *ofm, int p_out, int buf) {
 ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
 		vigil::ethernetaddr dl_src, int buf, uint16_t vlan, uint32_t mpls) {
 	datapathid src;
-	lg.warn("Installing new path: %ld: %d ->  %s\n", id, p_out,
+	lg.dbg("Installing new path: %ld: %d ->  %s\n", id, p_out,
 			dl_dst.string().c_str());
 
 	/*OpenFlow command initialization*/
@@ -371,7 +583,7 @@ ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
 
 	/*Send command*/
 	send_openflow_command(src, &ofm->header, true);
-	cookie++;
+	//cookie++;
 	return ofm->match;
 }
 
@@ -387,7 +599,7 @@ ofp_match fns::install_rule_vlan_pop(uint64_t id, int p_out,
 		vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf,
 		uint32_t vlan) {
 	datapathid src;
-	lg.warn("Installing new path POP %d : %ld: %d ->  %s\n", vlan, id, p_out,
+	lg.dbg("Installing new path POP %d : %ld: %d ->  %s\n", vlan, id, p_out,
 			dl_dst.string().c_str());
 
 	/*OpenFlow command initialization*/
@@ -419,7 +631,7 @@ ofp_match fns::install_rule_vlan_pop(uint64_t id, int p_out,
 
 	/*Send command*/
 	send_openflow_command(src, &ofm->header, true);
-	cookie++;
+	//cookie++;
 	return ofm->match;
 }
 
@@ -427,7 +639,7 @@ ofp_match fns::install_rule_vlan_swap(uint64_t id, int p_out,
 		vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf,
 		uint32_t tag_in, uint32_t tag_out) {
 	datapathid src;
-	lg.warn("Installing new path SWAP %d > %d: %ld: %d ->  %s\n", tag_in,
+	lg.dbg("Installing new path SWAP %d > %d: %ld: %d ->  %s\n", tag_in,
 			tag_out, id, p_out, dl_dst.string().c_str());
 
 	/*OpenFlow command initialization*/
@@ -460,7 +672,7 @@ ofp_match fns::install_rule_vlan_swap(uint64_t id, int p_out,
 
 	/*Send command*/
 	send_openflow_command(src, &ofm->header, true);
-	cookie++;
+	//	cookie++;
 	return ofm->match;
 }
 
@@ -468,7 +680,7 @@ int fns::remove_rule(boost::shared_ptr<FNSRule> rule) {
 	datapathid src;
 	ofp_action_list actlist;
 
-	lg.warn("Removing rule from switch: %lu", rule->sw_id);
+	lg.dbg("Removing rule from switch: %lu", rule->sw_id);
 	/*OpenFlow command initialization*/
 	ofp_flow_mod* ofm;
 	size_t size = sizeof *ofm;
@@ -490,7 +702,7 @@ int fns::remove_rule(boost::shared_ptr<FNSRule> rule) {
 	ofm->flags = ofd_flow_mod_flags();
 	/*Send command*/
 	send_openflow_command(src, &ofm->header, true);
-	cookie++;
+	//	cookie++;
 	return 0;
 }
 #endif
@@ -832,8 +1044,6 @@ int fns::remove_rule(boost::shared_ptr<FNSRule> rule) {
 	mod.instructions_num = 0;
 	mod.instructions = NULL;
 
-	/* XXX OK to do non-blocking send?  We do so with all other
-	 * commands on switch join */
 	if (send_openflow_msg(dpid, (struct ofl_msg_header *) &mod, 0/*xid*/, false)
 			== EAGAIN) {
 		lg.err("Error, unable to clear flow table on startup");
@@ -857,7 +1067,7 @@ void fns::forward_via_controller(uint64_t id, boost::shared_ptr<Buffer> buff,
 #endif
 }
 void fns::forward_via_controller(uint64_t id, const Buffer &buff, int port) {
-	lg.warn("ATTENTION. Sending packet directly to the destination: %lu :%d",
+	lg.dbg("ATTENTION. Sending packet directly to the destination: %lu :%d",
 			id, port);
 
 #ifdef NOX_OF10
@@ -939,6 +1149,7 @@ int fns::save_fns(fnsDesc* fns1) {
 	}
 	fns = rules.addFNS(fns1);
 
+	lg.dbg("Type: %d", fns1->forwarding);
 	for (int i = 0; i < fns1->nEp; i++) {
 		/*Save endpoints and compute path*/
 		endpoint *ep = GET_ENDPOINT(fns1, i);
@@ -974,115 +1185,111 @@ int fns::remove_fns(fnsDesc* fns1) {
 	return 0;
 }
 
-void fns::server() {
+/* Server functions */
+/*
+ void fns::setnonblocking(int sock) {
 
-	socklen_t addrlen;
-	struct sockaddr_in serv_addr, clientaddr;
-	int yes = 1;
-	int sockfd = 0;
-	int listener;
-	fd_set master; /* master file descriptor list */
-	fd_set read_fds; /* temp file descriptor list for select() */
-	int fdmax;
-	int newfd;
+ int opts;
+
+ opts = fcntl(sock, F_GETFL);
+ if (opts < 0) {
+ perror("fcntl(F_GETFL)");
+ exit(EXIT_FAILURE);
+ }
+ opts = (opts | O_NONBLOCK);
+ if (fcntl(sock, F_SETFL, opts) < 0) {
+ perror("fcntl(F_SETFL)");
+ exit(EXIT_FAILURE);
+ }
+ return;
+ }*/
+
+void fns::build_select_list() {
+	int listnum; /* Current item in connectlist for for loops */
+
+	/* First put together fd_set for select(), which will
+	 consist of the sock veriable in case a new connection
+	 is coming in, plus all the sockets we have already
+	 accepted. */
+
+	/* FD_ZERO() clears out the fd_set called socks, so that
+	 it doesn't contain any file descriptors. */
+
+	FD_ZERO(&socks);
+
+	/* FD_SET() adds the file descriptor "sock" to the fd_set,
+	 so that select() will return if a connection comes in
+	 on that socket (which means you have to do accept(), etc. */
+
+	FD_SET(sock,&socks);
+
+	/* Loops through all the possible connections and adds
+	 those sockets to the fd_set */
+
+	for (listnum = 0; listnum < MAX_CONNECTIONS; listnum++) {
+		if (connectlist[listnum] != 0) {
+			FD_SET(connectlist[listnum],&socks);
+			if (connectlist[listnum] > highsock)
+				highsock = connectlist[listnum];
+		}
+	}
+}
+
+void fns::handle_new_connection() {
+	int listnum; /* Current item in connectlist for for loops */
+	int connection; /* Socket file descriptor for incoming connections */
+
+	/* We have a new connection coming in!  We'll
+	 try to find a spot for it in connectlist. */
+	connection = accept(sock, NULL, NULL);
+	if (connection < 0) {
+		perror("accept");
+		exit(EXIT_FAILURE);
+	}
+	//	setnonblocking(connection);
+	for (listnum = 0; (listnum < MAX_CONNECTIONS) && (connection != -1); listnum++)
+		if (connectlist[listnum] == 0) {
+			lg.dbg("\nConnection accepted:   FD=%d; Slot=%d\n", connection,
+					listnum);
+			connectlist[listnum] = connection;
+			connection = -1;
+		}
+	if (connection != -1) {
+		/* No room left in the queue! */
+		printf("\nNo room left for new client.\n");
+		close(connection);
+	}
+}
+
+void fns::read_socks() {
+	int listnum; /* Current item in connectlist for for loops */
+	char buf[MSG_SIZE]; /* Buffer for socket reads */
 	int nbytes;
-	struct timeval tv;
-	uint8_t* buf;
-	int i;
+	/* OK, now socks will be set with whatever socket(s)
+	 are ready for reading.  Lets first check our
+	 "listening" socket, and then check the sockets
+	 in connectlist. */
 
-	listener = socket(AF_INET, SOCK_STREAM, 0);
-	if (listener < 0) {
-		perror("ERROR opening socket");
-		exit(1);
-	}
+	/* If a client is trying to connect() to our listening
+	 socket, select() will consider that as the socket
+	 being 'readable'. Thus, if the listening socket is
+	 part of the fd_set, we need to accept a new connection. */
 
-	bzero((char *) &serv_addr, sizeof(serv_addr));
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_addr.s_addr = INADDR_ANY;
-	serv_addr.sin_port = htons(server_port);
+	if (FD_ISSET(sock,&socks))
+		handle_new_connection();
+	/* Now check connectlist for available data */
 
-	if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-		perror("ERROR on setsockopt()");
-		exit(1);
-	}
+	/* Run through our sockets and check to see if anything
+	 happened with them, if so 'service' them. */
 
-	if (bind(listener, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-		close(listener);
-		perror("ERROR on binding");
-		exit(1);
-	}
-
-	if (listen(listener, MAX_CONNECTIONS) == -1) {
-		perror("ERROR on listen");
-		exit(1);
-	}
-
-	fdmax = listener; /* maximum file descriptor number */
-
-	/*Allocate reception buffer*/
-	buf = (uint8_t*) malloc(MSG_SIZE);
-	if (buf == NULL) {
-		perror("ERROR in malloc");
-		exit(1);
-	}
-
-	/* clear the master and temp sets */
-	FD_ZERO(&master);
-	FD_ZERO(&read_fds);
-
-	/* add the listener to the master set */
-	FD_SET(listener, &master);
-
-	/*Loop forever*/
-	while (1) {
-		/* copy it */
-		read_fds = master;
-
-		/*Set timeout*/
-		tv.tv_sec = SELECT_TIMEOUT;
-		tv.tv_usec = 0;
-		if (select(fdmax + 1, &read_fds, NULL, NULL, &tv) == -1) {
-			perror("Server-select()");
-			exit(1);
-		}
-
-		/*Check listening*/
-		if (FD_ISSET(listener, &read_fds)) {
-			addrlen = sizeof(clientaddr);
-			if ((newfd = accept(listener, (struct sockaddr *) &clientaddr,
-					(socklen_t *) &addrlen)) == -1) {
-				perror("Server-accept() error lol!");
-				continue;
-			}
-			FD_SET(newfd, &master); /* add to master set */
-			/*TODO manage multiple ports*/
-			sockfd = newfd;
-
-			if (newfd > fdmax)
-				fdmax = newfd;//* keep track of the maximum */
-
-			printf("New connection in %d\n", sockfd);
-
-		}
-		int s = sockfd;
-		if (FD_ISSET(s, &read_fds)) {
-			/*do the job*/
-			if ((nbytes = recv(s, buf, MSG_SIZE, 0)) <= 0) {
-				/* got error or connection closed by client */
-				if (nbytes == 0) {
-					/* connection closed */
-					printf("socket hung up\n");
-				} else {
-					perror("recv()");
-				}
+	for (listnum = 0; listnum < MAX_CONNECTIONS; listnum++) {
+		if (FD_ISSET(connectlist[listnum],&socks)) {
+			if ((nbytes = recv(connectlist[listnum], buf, MSG_SIZE, 0)) <= 0) {
+				lg.dbg("socket hung up\n");
 				/* close it... */
-				close(s);
-				/* remove from master set */
-				FD_CLR(s, &master);
-				//} else if (nbytes < sizeof(struct msg_hdr)) {
-				//	lg.dbg("Too small packet");
+				close(connectlist[listnum]);
+				connectlist[listnum] = 0;
 			} else {
-				/* we got some data from a client*/
 				lg.dbg("New msg of size %d", nbytes);
 				unsigned int offset = 0;
 				do {
@@ -1101,23 +1308,8 @@ void fns::server() {
 						remove_fns(&msg->fns);
 						break;
 					case FNS_MSG_SW_IDS: {
-						/**TODO return IDs of the endpoints and num of ports*/
-						vector<Node*> nodeFinder = finder.getNodes();
-						lg.dbg("Current nodes in the controller:");
-						int size = sizeof(struct msg_ids) + nodeFinder.size()
-								* sizeof(endpoint);
-						struct msg_ids *msg1 = (struct msg_ids *) malloc(size);
-						memset(msg1, 0, size);
-						msg1->nEp = nodeFinder.size();
-						msg1->type = FNS_MSG_SW_IDS;
-						for (i = 0; i < nodeFinder.size(); i++) {
-							lg.dbg("ID: %lu: ports: %d", nodeFinder.at(i)->id,
-									nodeFinder.at(i)->ports);
-							msg1->endpoints[i].swId = nodeFinder.at(i)->id;
-							msg1->endpoints[i].port = nodeFinder.at(i)->ports;
-						}
-						if (write(s, msg1, size) < 0)
-							lg.err("Error sending packet");
+						/*get up ports that are not links to other switches*/
+						lg.dbg("Getting possible endpoints");
 						break;
 					}
 					default:
@@ -1129,15 +1321,97 @@ void fns::server() {
 					lg.dbg("msg size %d %d", (msg->size), offset);
 
 				} while (offset < nbytes);
+				if (write(connectlist[listnum], "1", 1) == 0)
+					lg.dbg("error in response ok");
 			}
 		}
-	}
-	lg.dbg("Finishing server");
-	free(buf);
-	/*Close all sockets*/
-	close(listener);
-
+	} /* for (all entries in queue) */
 }
+
+void fns::server() {
+	struct sockaddr_in server_address; /* bind info structure */
+	int reuse_addr = 1; /* Used so we can re-bind to our port
+	 while a previous connection is still
+	 in TIME_WAIT state. */
+	struct timeval timeout; /* Timeout for select */
+	int readsocks; /* Number of sockets ready for reading */
+
+	/* Obtain a file descriptor for our "listening" socket */
+	sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock < 0) {
+		perror("socket");
+		exit(EXIT_FAILURE);
+	}
+	/* So that we can re-bind to it without TIME_WAIT problems */
+	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr));
+
+	/* Set socket to non-blocking with our setnonblocking routine */
+	//	setnonblocking(sock);
+
+	memset((char *) &server_address, 0, sizeof(server_address));
+	server_address.sin_family = AF_INET;
+	server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+	server_address.sin_port = htons(server_port);
+	if (bind(sock, (struct sockaddr *) &server_address, sizeof(server_address))
+			< 0) {
+		perror("bind");
+		close(sock);
+		exit(EXIT_FAILURE);
+	}
+
+	/* Set up queue for incoming connections. */
+	listen(sock, MAX_CONNECTIONS);
+
+	/* Since we start with only one socket, the listening socket,
+	 it is the highest socket so far. */
+	highsock = sock;
+	memset((char *) &connectlist, 0, sizeof(connectlist));
+
+	while (1) { /* Main server loop - forever */
+		build_select_list();
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+
+		/* The first argument to select is the highest file
+		 descriptor value plus 1. In most cases, you can
+		 just pass FD_SETSIZE and you'll be fine. */
+
+		/* The second argument to select() is the address of
+		 the fd_set that contains sockets we're waiting
+		 to be readable (including the listening socket). */
+
+		/* The third parameter is an fd_set that you want to
+		 know if you can write on -- this example doesn't
+		 use it, so it passes 0, or NULL. The fourth parameter
+		 is sockets you're waiting for out-of-band data for,
+		 which usually, you're not. */
+
+		/* The last parameter to select() is a time-out of how
+		 long select() should block. If you want to wait forever
+		 until something happens on a socket, you'll probably
+		 want to pass NULL. */
+
+		readsocks = select(highsock + 1, &socks, (fd_set *) 0, (fd_set *) 0,
+				&timeout);
+
+		/* select() returns the number of sockets that had
+		 things going on with them -- i.e. they're readable. */
+
+		/* Once select() returns, the original fd_set has been
+		 modified so it now reflects the state of why select()
+		 woke up. i.e. If file descriptor 4 was originally in
+		 the fd_set, and then it became readable, the fd_set
+		 contains file descriptor 4 in it. */
+
+		if (readsocks < 0) {
+			perror("select");
+			exit(EXIT_FAILURE);
+		}
+		if (readsocks)
+			read_socks();
+	} /* while(1) */
+}
+
 void fns::configure(const Configuration* c) {
 	server_port = TCP_PORT;
 
@@ -1156,8 +1430,12 @@ void fns::install() {
 
 	register_handler("Link_event", boost::bind(&fns::handle_link_event, this,
 			_1));
+	register_handler("Port_status_event", boost::bind(&fns::handle_port_event,
+			this, _1));
 	register_handler("Datapath_join_event", boost::bind(
 			&fns::handle_datapath_join, this, _1));
+	register_handler("Flow_stats_in_event", boost::bind(
+			&fns::handle_flow_stats_in_event, this, _1));
 	register_handler("Datapath_leave_event", boost::bind(
 			&fns::handle_datapath_leave, this, _1));
 	register_handler("Packet_in_event", boost::bind(&fns::handle_packet_in,
