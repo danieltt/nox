@@ -61,6 +61,7 @@ public:
 
 	static const int IDLE_TIMEOUT = 60;
 	static const int HARD_TIMEOUT = 0;
+	static const int DROP_TIMEOUT = 5;
 	static const int VLAN_NONE = 0xffff;
 	static const int LINK_DOWN = 0xf12af;
 
@@ -180,6 +181,8 @@ private:
 	ofp_match install_rule_vlan_swap(uint64_t id, int p_out,
 			vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf,
 			uint32_t tag_in, uint32_t tag_out);
+	ofp_match install_rule_drop(uint64_t id, int p_in, vigil::ethernetaddr dl_src,
+			int buf, uint16_t vlan);
 
 #ifdef NOX_OF11
 #ifdef MPLS

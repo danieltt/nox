@@ -198,7 +198,21 @@ Disposition fns::handle_packet_in(const Event& e) {
 	if (ep == NULL) {
 		lg.dbg("EPoint not found. %ld:%d v:%d m:%d k:%lu", dpid, port, vlan,
 				mpls, key);
-		/*DROP packet*/
+		/*Can be that path is not stablished yet. if is the case, send it back to the controler otherwise drop for a few seconds*/
+		if((ep=rules.getGlobalLocation(dl_src))!=boost::shared_ptr<EPoint>()){
+			/*send packet back*/
+			lg.dbg("reinserting packet to network. Sync problem with flowmod");
+			//send_openflow_packet(pi.datapath_id,b,OFPP_TABLE,OFPP_NONE,false);
+			send_openflow_packet(pi.datapath_id,buf_id,OFPP_TABLE,OFPP_NONE,false);
+
+		}else{
+			/*DROP packet*/
+			lg.dbg("Host not found. Droping packet for %d seconds",DROP_TIMEOUT);
+			install_rule_drop(dpid,port,dl_src,buf_id,vlan);
+
+		}
+
+
 	} else {
 		boost::shared_ptr<FNS> fns = rules.getFNS(ep->fns_uuid);
 		switch (fns->getForwarding()) {
@@ -580,6 +594,53 @@ ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
 	action.len = htons(sizeof(ofp_action_output));
 	action.max_len = htons(0);
 	action.port = htons(p_out);
+
+	/*Send command*/
+	send_openflow_command(src, &ofm->header, true);
+	//cookie++;
+	return ofm->match;
+}
+
+ofp_match fns::install_rule_drop(uint64_t id, int p_in, vigil::ethernetaddr dl_src,
+		int buf, uint16_t vlan) {
+	datapathid src;
+	lg.dbg("Installing drop rule: %ld: %d ->  %s\n", id, p_in,
+			dl_src.string().c_str());
+
+	/*OpenFlow command initialization*/
+	ofp_flow_mod* ofm;
+	size_t size = sizeof *ofm ;
+	boost::shared_array<char> raw_of(new char[size]);
+	ofm = (ofp_flow_mod*) raw_of.get();
+	ofm->header.length = htons(size);
+	src = datapathid::from_host(id);
+
+	memset(&ofm->match, 0, sizeof(struct ofp_match));
+	/*WILD cards*/
+	uint32_t filter = OFPFW_ALL;
+	/*Filter by port*/
+	filter &= (~OFPFW_DL_SRC);
+	filter &= (~OFPFW_IN_PORT);
+	if (vlan != fns::VLAN_NONE)
+		filter &= (~OFPFW_DL_VLAN);
+	memcpy(&ofm->match.dl_src, dl_src.octet, sizeof(dl_src.octet));
+	ofm->match.in_port = htons(p_in);
+
+	ofm->match.dl_vlan = htons(vlan);
+	ofm->match.wildcards = htonl(filter);
+
+	ofm->buffer_id = htonl(buf);
+	ofm->header.version = OFP_VERSION;
+	ofm->header.type = OFPT_FLOW_MOD;
+
+	/*Some more parameters*/
+	ofm->cookie = htonll(cookie);
+	ofm->command = htons(OFPFC_ADD);
+	ofm->hard_timeout = htons(HARD_TIMEOUT);
+	ofm->idle_timeout = htons(DROP_TIMEOUT);
+	ofm->priority = htons(OFP_DEFAULT_PRIORITY);
+	ofm->flags = ofd_flow_mod_flags();
+
 
 	/*Send command*/
 	send_openflow_command(src, &ofm->header, true);
