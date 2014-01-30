@@ -59,7 +59,7 @@ using namespace vigil::container;
 class fns: public Component {
 public:
 
-	static const int IDLE_TIMEOUT = 60;
+	static const int IDLE_TIMEOUT = 5;
 	static const int HARD_TIMEOUT = 0;
 	static const int DROP_TIMEOUT = 5;
 	static const int VLAN_NONE = 0xffff;
@@ -152,10 +152,12 @@ private:
 	void process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<EPoint> ep_src, const Flow& flow,
 					const Buffer& buff, int buf_id);
 	void install_path(ethernetaddr dl_src, ethernetaddr dl_dst, boost::shared_ptr<
-			EPoint> ep_src, boost::shared_ptr<EPoint> ep_dst, int buf_id);
+			EPoint> ep_src, boost::shared_ptr<EPoint> ep_dst, int buf_id,uint32_t nw_src, uint32_t nw_dst);
 
 	void set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
-			vigil::ethernetaddr dl_src, uint16_t vlan);
+				vigil::ethernetaddr dl_src, uint16_t vlan);
+	void set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
+			vigil::ethernetaddr dl_src, uint16_t vlan,uint32_t nw_src, uint32_t nw_dst);
 #ifdef NOX_OF11
 	void set_mod_def(struct ofl_msg_flow_mod *mod, int p_out, int buf);
 #else
@@ -170,7 +172,8 @@ private:
 			boost::shared_ptr<EPoint> ep_src, const Buffer& buff);
 
 	ofp_match install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
-			vigil::ethernetaddr dl_src, int buf, uint16_t vlan, uint32_t mpls);
+			vigil::ethernetaddr dl_src, int buf, uint16_t vlan, uint32_t mpls,
+			uint32_t nw_src, uint32_t nw_dst);
 
 	ofp_match install_rule_vlan_push(uint64_t id, int p_out,
 			vigil::ethernetaddr dl_dst, vigil::ethernetaddr dl_src, int buf,

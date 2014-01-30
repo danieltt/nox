@@ -97,7 +97,7 @@ Disposition fns::handle_flow_stats_in_event(const Event& e) {
 		ep_dst = rules.getGlobalLocation(dl_dst);
 		ep_src = rules.getGlobalLocation(dl_src);
 		lg.dbg("Destination is in endpoint %lu", ep_dst->ep_id);
-		install_path(dl_src, dl_dst, ep_src, ep_dst, -1);
+		install_path(dl_src, dl_dst, ep_src, ep_dst, -1,fe.flows.at(i).match.nw_src,fe.flows.at(i).match.nw_dst );
 
 	}
 
@@ -347,7 +347,7 @@ void fns::process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 		}
 
 		match = install_rule(path.at(k)->id, out_port, dl_src, dl_dst, bufid,
-				ep_src->vlan, 0);
+				ep_src->vlan, 0,0,0);
 
 		/* Keeping track of the installed rules */
 		boost::shared_ptr<FNSRule> rule = boost::shared_ptr<FNSRule>(
@@ -360,7 +360,7 @@ void fns::process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 			lg.dbg("Setting buff id to %d", bufid);
 		}
 		match = install_rule(path.at(k)->id, in_port, dl_dst, dl_src, bufid,
-				ep_dst->vlan, 0);
+				ep_dst->vlan, 0,0,0);
 
 		/* Keeping track of the installed rules */
 		rule = boost::shared_ptr<FNSRule>(new FNSRule(path.at(k)->id, match));
@@ -421,12 +421,12 @@ void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 		return;
 	}
 
-	install_path(dl_src, dl_dst, ep_src, ep_dst, buf_id);
+	install_path(dl_src, dl_dst, ep_src, ep_dst, buf_id, nw_src, nw_dst);
 
 }
 void fns::install_path(ethernetaddr dl_src, ethernetaddr dl_dst,
 		boost::shared_ptr<EPoint> ep_src, boost::shared_ptr<EPoint> ep_dst,
-		int buf_id) {
+		int buf_id, uint32_t nw_src, uint32_t nw_dst) {
 	ofp_match match;
 	vector<Node*> path;
 	int in_port = 0, out_port = 0;
@@ -492,7 +492,7 @@ void fns::install_path(ethernetaddr dl_src, ethernetaddr dl_dst,
 		} else {
 			/*none*/
 			match = install_rule(path.at(k)->id, out_port, dl_src, dl_dst,
-					bufid, ep_src->vlan, 0);
+					bufid, ep_src->vlan, 0,nw_src, nw_dst);
 		}
 
 		/* Keeping track of the installed rules */
@@ -525,7 +525,7 @@ void fns::install_path(ethernetaddr dl_src, ethernetaddr dl_dst,
 		} else {
 			/*none*/
 			match = install_rule(path.at(k)->id, in_port, dl_dst, dl_src,
-					bufid, ep_dst->vlan, 0);
+					bufid, ep_dst->vlan, 0,nw_src, nw_dst);
 		}
 
 		/* Keeping track of the installed rules */
@@ -541,16 +541,28 @@ void fns::install_path(ethernetaddr dl_src, ethernetaddr dl_dst,
 #ifdef NOX_OF10
 void fns::set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
 		vigil::ethernetaddr dl_src, uint16_t vlan) {
+	return set_match(match,dl_dst, dl_src,vlan, 0, 0);
+}
+
+void fns::set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
+		vigil::ethernetaddr dl_src, uint16_t vlan,uint32_t nw_src, uint32_t nw_dst) {
 	memset(match, 0, sizeof(struct ofp_match));
 	/*WILD cards*/
 	uint32_t filter = OFPFW_ALL;
 	/*Filter by port*/
 	filter &= (~OFPFW_DL_DST);
 	filter &= (~OFPFW_DL_SRC);
+	if(nw_src!=0){
+		filter &= (~OFPFW_NW_SRC_ALL);
+		filter &= (~OFPFW_NW_DST_ALL);
+	}
+
 	if (vlan != fns::VLAN_NONE)
 		filter &= (~OFPFW_DL_VLAN);
 	memcpy(match->dl_dst, dl_dst.octet, sizeof(dl_dst.octet));
 	memcpy(match->dl_src, dl_src.octet, sizeof(dl_src.octet));
+	match->nw_dst=nw_dst;
+	match->nw_src=nw_src;
 	match->dl_vlan = htons(vlan);
 	match->wildcards = htonl(filter);
 }
@@ -570,7 +582,8 @@ void fns::set_mod_def(struct ofp_flow_mod *ofm, int p_out, int buf) {
 }
 
 ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
-		vigil::ethernetaddr dl_src, int buf, uint16_t vlan, uint32_t mpls) {
+		vigil::ethernetaddr dl_src, int buf, uint16_t vlan, uint32_t mpls,
+		uint32_t nw_src, uint32_t nw_dst) {
 	datapathid src;
 	lg.dbg("Installing new path: %ld: %d ->  %s\n", id, p_out,
 			dl_dst.string().c_str());
@@ -583,7 +596,7 @@ ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
 	ofm->header.length = htons(size);
 	src = datapathid::from_host(id);
 
-	set_match(&ofm->match, dl_dst, dl_src, vlan);
+	set_match(&ofm->match, dl_dst, dl_src, vlan, nw_src, nw_dst);
 	set_mod_def(ofm, p_out, buf);
 
 	/*Action*/
