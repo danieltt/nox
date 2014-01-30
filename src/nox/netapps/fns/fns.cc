@@ -525,7 +525,7 @@ void fns::install_path(ethernetaddr dl_src, ethernetaddr dl_dst,
 		} else {
 			/*none*/
 			match = install_rule(path.at(k)->id, in_port, dl_dst, dl_src,
-					bufid, ep_dst->vlan, 0,nw_src, nw_dst);
+					bufid, ep_dst->vlan, 0,nw_dst, nw_src);
 		}
 
 		/* Keeping track of the installed rules */
@@ -545,7 +545,7 @@ void fns::set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
 }
 
 void fns::set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
-		vigil::ethernetaddr dl_src, uint16_t vlan,uint32_t nw_src, uint32_t nw_dst) {
+		vigil::ethernetaddr dl_src, uint16_t vlan,uint32_t nw_dst, uint32_t nw_src) {
 	memset(match, 0, sizeof(struct ofp_match));
 	/*WILD cards*/
 	uint32_t filter = OFPFW_ALL;
@@ -583,7 +583,7 @@ void fns::set_mod_def(struct ofp_flow_mod *ofm, int p_out, int buf) {
 
 ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
 		vigil::ethernetaddr dl_src, int buf, uint16_t vlan, uint32_t mpls,
-		uint32_t nw_src, uint32_t nw_dst) {
+		uint32_t nw_dst, uint32_t nw_src) {
 	datapathid src;
 	lg.dbg("Installing new path: %ld: %d ->  %s\n", id, p_out,
 			dl_dst.string().c_str());
@@ -596,7 +596,7 @@ ofp_match fns::install_rule(uint64_t id, int p_out, vigil::ethernetaddr dl_dst,
 	ofm->header.length = htons(size);
 	src = datapathid::from_host(id);
 
-	set_match(&ofm->match, dl_dst, dl_src, vlan, nw_src, nw_dst);
+	set_match(&ofm->match, dl_dst, dl_src, vlan, nw_dst, nw_src);
 	set_mod_def(ofm, p_out, buf);
 
 	/*Action*/
