@@ -390,7 +390,17 @@ void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 	ethernetaddr dl_src = ethernetaddr(flow.dl_src);
 	nw_dst = flow.nw_dst;
 	nw_src = flow.nw_src;
-	if (flow.dl_type == ethernet::ARP && dl_dst.is_broadcast()) {
+	fns->addMAC(nw_src, flow.dl_src);
+
+	/* Try to resolve localy */
+	if (dl_dst.is_broadcast()){
+		dl_dst = fns->getMAC(nw_dst);
+	}
+
+	lg.dbg("Destination for %u is %d-%d-%d-%d-%d-%d", nw_dst, dl_dst.octet[0],
+			dl_dst.octet[1], dl_dst.octet[2], dl_dst.octet[3], dl_dst.octet[4],
+			dl_dst.octet[5]);
+	if(dl_dst.is_zero()  && flow.dl_type == ethernet::ARP && dl_dst.is_broadcast()) {
 #else
 		ethernetaddr dl_dst = ethernetaddr(flow.match.dl_dst);
 		ethernetaddr dl_src = ethernetaddr(flow.match.dl_src);
@@ -552,7 +562,8 @@ void fns::set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
 	/*Filter by port*/
 	filter &= (~OFPFW_DL_DST);
 	filter &= (~OFPFW_DL_SRC);
-	if(nw_src!=0){
+
+	if(nw_src != 0){
 		filter &= (~OFPFW_NW_SRC_ALL);
 		filter &= (~OFPFW_NW_DST_ALL);
 	}
@@ -561,8 +572,8 @@ void fns::set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
 		filter &= (~OFPFW_DL_VLAN);
 	memcpy(match->dl_dst, dl_dst.octet, sizeof(dl_dst.octet));
 	memcpy(match->dl_src, dl_src.octet, sizeof(dl_src.octet));
-	match->nw_dst=nw_dst;
-	match->nw_src=nw_src;
+	match->nw_dst=htonl(nw_dst);
+	match->nw_src=htonl(nw_src);
 	match->dl_vlan = htons(vlan);
 	match->wildcards = htonl(filter);
 }
