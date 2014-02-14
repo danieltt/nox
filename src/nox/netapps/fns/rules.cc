@@ -104,11 +104,17 @@ boost::shared_ptr<EPoint> FNS::lookup(uint32_t addr) {
 	return table.getEndpoint(addr);
 }
 
-bool FNS::addlocation(vigil::ethernetaddr addr, boost::shared_ptr<EPoint> ep) {
-	return l2table.insertClient(addr, ep);
+bool FNS::addlocation(vigil::ethernetaddr addr, uint32_t nw_addr, boost::shared_ptr<EPoint> ep) {
+	l2table.insertClient(addr, ep);
+	l2table.insertClient3(nw_addr, ep);
+	return 0;
 }
-boost::shared_ptr<EPoint> FNS::getLocation(vigil::ethernetaddr addr) {
-	return l2table.getLocation(addr);
+boost::shared_ptr<EPoint> FNS::getLocation(vigil::ethernetaddr addr, uint32_t nw_addr) {
+	boost::shared_ptr<EPoint> ep = l2table.getLocation(addr);
+	if (ep == NULL)
+		ep = l2table.getLocation3(nw_addr);
+	return ep;
+
 }
 
 bool FNS::addMAC(uint32_t ip, vigil::ethernetaddr mac) {
@@ -183,13 +189,13 @@ void RulesDB::removeFNS(uint64_t uuid) {
 
 }
 
-boost::shared_ptr<EPoint>  RulesDB::getGlobalLocation(vigil::ethernetaddr addr){
+boost::shared_ptr<EPoint>  RulesDB::getGlobalLocation(vigil::ethernetaddr addr, uint32_t addr3){
 	map<uint64_t, boost::shared_ptr<FNS> >::iterator fns;
 	boost::shared_ptr<EPoint> ep;
 
 	fns = fnsList.begin();
 	while(fns!=fnsList.end()){
-		ep=fns->second->getLocation(addr);
+		ep=fns->second->getLocation(addr,addr3);
 		if(ep!=boost::shared_ptr<EPoint>())
 			return ep;
 		fns++;
@@ -242,6 +248,34 @@ boost::shared_ptr<EPoint> Locator::getLocation(vigil::ethernetaddr addr) {
 	map<vigil::ethernetaddr, boost::shared_ptr<EPoint> >::iterator epr =
 			clients.find(addr);
 	if (clients.end() == epr)
+		return boost::shared_ptr<EPoint>();
+	return boost::shared_ptr<EPoint>(epr->second);
+}
+
+bool Locator::insertClient3(uint32_t addr,
+		boost::shared_ptr<EPoint> ep) {
+
+	map<uint32_t, boost::shared_ptr<EPoint> >::iterator epr =
+			clients3.find(addr);
+	if (clients3.end() != epr) {
+		/* Update value */
+		epr->second = ep;
+	} else {
+		/* Add value */
+		clients3.insert(pair<uint32_t, boost::shared_ptr<EPoint> > (
+				addr, ep));
+	}
+
+	return true;
+}
+
+boost::shared_ptr<EPoint> Locator::getLocation3(uint32_t addr) {
+	if (clients.size() == 0) {
+		return boost::shared_ptr<EPoint>();
+	}
+	map<uint32_t, boost::shared_ptr<EPoint> >::iterator epr =
+			clients3.find(addr);
+	if (clients3.end() == epr)
 		return boost::shared_ptr<EPoint>();
 	return boost::shared_ptr<EPoint>(epr->second);
 }

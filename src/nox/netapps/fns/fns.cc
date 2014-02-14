@@ -94,8 +94,8 @@ Disposition fns::handle_flow_stats_in_event(const Event& e) {
 		/* get source and destination and install new rules */
 		dl_dst = ethernetaddr(fe.flows.at(i).match.dl_dst);
 		dl_src = ethernetaddr(fe.flows.at(i).match.dl_src);
-		ep_dst = rules.getGlobalLocation(dl_dst);
-		ep_src = rules.getGlobalLocation(dl_src);
+		ep_dst = rules.getGlobalLocation(dl_dst,0);
+		ep_src = rules.getGlobalLocation(dl_src,0);
 		lg.dbg("Destination is in endpoint %lu", ep_dst->ep_id);
 		install_path(dl_src, dl_dst, ep_src, ep_dst, -1,fe.flows.at(i).match.nw_src,fe.flows.at(i).match.nw_dst );
 
@@ -160,6 +160,7 @@ Disposition fns::handle_packet_in(const Event& e) {
 	uint32_t mpls = 0;
 	ethernetaddr dl_src;
 	int buf_id;
+	uint32_t  nw_src;
 
 #ifdef NOX_OF10
 	const Packet_in_event& pi = assert_cast<const Packet_in_event&> (e);
@@ -170,6 +171,7 @@ Disposition fns::handle_packet_in(const Event& e) {
 	dl_src = ethernetaddr(flow.dl_src);
 	vlan = ntohs(flow.dl_vlan);
 	buf_id = pi.buffer_id;
+	nw_src = flow.nw_src;
 #else
 	const Ofp_msg_event& ome = assert_cast<const Ofp_msg_event&> (e);
 	struct ofl_msg_packet_in *in = (struct ofl_msg_packet_in *) **ome.msg;
@@ -199,7 +201,7 @@ Disposition fns::handle_packet_in(const Event& e) {
 		lg.dbg("EPoint not found. %ld:%d v:%d m:%d k:%lu", dpid, port, vlan,
 				mpls, key);
 		/*Can be that path is not stablished yet. if is the case, send it back to the controler otherwise drop for a few seconds*/
-		if((ep=rules.getGlobalLocation(dl_src))!=boost::shared_ptr<EPoint>()){
+		if((ep=rules.getGlobalLocation(dl_src,0))!=boost::shared_ptr<EPoint>()){
 			/*send packet back*/
 			lg.dbg("reinserting packet to network. Sync problem with flowmod");
 			//send_openflow_packet(pi.datapath_id,b,OFPP_TABLE,OFPP_NONE,false);
@@ -217,7 +219,7 @@ Disposition fns::handle_packet_in(const Event& e) {
 		boost::shared_ptr<FNS> fns = rules.getFNS(ep->fns_uuid);
 		switch (fns->getForwarding()) {
 		case LIBNETVIRT_FORWARDING_L2:
-			fns->addlocation(dl_src, ep);
+			fns->addlocation(dl_src, nw_src, ep);
 
 			process_packet_in_l2(fns, ep, flow, b, buf_id);
 			break;
@@ -276,7 +278,6 @@ void fns::process_packet_in_l3(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 	lg.dbg("L3 FNS. Packet in %ld:%d", ep_src->ep_id, ep_src->in_port);
 	vigil::ethernetaddr dl_dst, dl_src;
 	uint32_t nw_dst = ntohl(flow.nw_dst);
-	fns->addMAC(nw_dst, flow.dl_src);
 	vector<Node*> path;
 	int in_port = 0, out_port = 0;
 	int psize;
@@ -390,17 +391,11 @@ void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 	ethernetaddr dl_src = ethernetaddr(flow.dl_src);
 	nw_dst = flow.nw_dst;
 	nw_src = flow.nw_src;
-	fns->addMAC(nw_src, flow.dl_src);
 
-	/* Try to resolve localy */
-	if (dl_dst.is_broadcast()){
-		dl_dst = fns->getMAC(nw_dst);
-	}
 
-	lg.dbg("Destination for %u is %d-%d-%d-%d-%d-%d", nw_dst, dl_dst.octet[0],
-			dl_dst.octet[1], dl_dst.octet[2], dl_dst.octet[3], dl_dst.octet[4],
-			dl_dst.octet[5]);
-	if(dl_dst.is_zero()  && flow.dl_type == ethernet::ARP && dl_dst.is_broadcast()) {
+	/*Get location of destination*/
+	ep_dst = fns->getLocation(dl_dst,nw_dst);
+	if(flow.dl_type == ethernet::ARP && dl_dst.is_broadcast() && ep_dst == NULL) {
 #else
 		ethernetaddr dl_dst = ethernetaddr(flow.match.dl_dst);
 		ethernetaddr dl_src = ethernetaddr(flow.match.dl_src);
@@ -417,8 +412,8 @@ void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 		return;
 	}
 
-	/*Get location of destination*/
-	ep_dst = fns->getLocation(dl_dst);
+
+
 	if (ep_dst == NULL) {
 		lg.dbg("NO destination for this packet in the LOCATOR: %s",
 				dl_dst.string().c_str());

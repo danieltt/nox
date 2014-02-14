@@ -38,9 +38,12 @@ class Locator {
 public:
 	bool insertClient(vigil::ethernetaddr addr, boost::shared_ptr<EPoint> ep);
 	boost::shared_ptr<EPoint> getLocation(vigil::ethernetaddr addr);
+	bool insertClient3(uint32_t addr, boost::shared_ptr<EPoint> ep);
+	boost::shared_ptr<EPoint> getLocation3(uint32_t addr);
 	void printLocations();
 private:
 	map<vigil::ethernetaddr, boost::shared_ptr<EPoint> > clients;
+	map<uint32_t, boost::shared_ptr<EPoint> > clients3;
 	bool validateAddr(vigil::ethernetaddr addr);
 
 };
@@ -57,8 +60,8 @@ public:
 	/* L3 lookup*/
 	boost::shared_ptr<EPoint> lookup(uint32_t addr);
 	/* L2 lookup*/
-	bool addlocation(vigil::ethernetaddr addr, boost::shared_ptr<EPoint> ep);
-	boost::shared_ptr<EPoint> getLocation(vigil::ethernetaddr addr);
+	bool addlocation(vigil::ethernetaddr addr, uint32_t nw_addr, boost::shared_ptr<EPoint> ep);
+	boost::shared_ptr<EPoint> getLocation(vigil::ethernetaddr addr, uint32_t nw_addr);
 
 	/*ARP table lookup */
 	bool addMAC(uint32_t ip, vigil::ethernetaddr mac);
@@ -87,7 +90,7 @@ public:
 	void removeFNS(uint64_t uuid);
 	boost::shared_ptr<FNS> getFNS(uint64_t uuid);
 
-	boost::shared_ptr<EPoint> getGlobalLocation(vigil::ethernetaddr addr);
+	boost::shared_ptr<EPoint> getGlobalLocation(vigil::ethernetaddr addr,uint32_t addr3);
 
 
 private:
