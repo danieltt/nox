@@ -217,6 +217,7 @@ Disposition fns::handle_packet_in(const Event& e) {
 
 	} else {
 		boost::shared_ptr<FNS> fns = rules.getFNS(ep->fns_uuid);
+		fns->addMAC(nw_src, dl_src);
 		switch (fns->getForwarding()) {
 		case LIBNETVIRT_FORWARDING_L2:
 			fns->addlocation(dl_src, nw_src, ep);
@@ -411,7 +412,15 @@ void fns::process_packet_in_l2(boost::shared_ptr<FNS> fns, boost::shared_ptr<
 
 		return;
 	}
+	
+	if(dl_dst.is_broadcast()){
+		/*Get MAC from local table*/
+		lg.dbg("Getting MAC from local table. We send directly");
+		dl_dst = fns->getMAC(nw_dst);
 
+		forward_via_controller(ep_dst->ep_id, buff, ep_dst->in_port);
+		return;
+	}
 
 
 	if (ep_dst == NULL) {
@@ -567,8 +576,8 @@ void fns::set_match(struct ofp_match* match, vigil::ethernetaddr dl_dst,
 		filter &= (~OFPFW_DL_VLAN);
 	memcpy(match->dl_dst, dl_dst.octet, sizeof(dl_dst.octet));
 	memcpy(match->dl_src, dl_src.octet, sizeof(dl_src.octet));
-	match->nw_dst=htonl(nw_dst);
-	match->nw_src=htonl(nw_src);
+	match->nw_dst=nw_dst;
+	match->nw_src=nw_src;
 	match->dl_vlan = htons(vlan);
 	match->wildcards = htonl(filter);
 }
